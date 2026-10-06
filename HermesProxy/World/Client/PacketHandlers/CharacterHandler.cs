@@ -350,6 +350,11 @@ public partial class WorldClient
         // Name queries the client made at character select go out now.
         GetSession().ToServer.SetGate(OutboxGate.InWorld, open: true);
 
+        // Quest history: 3.3.x servers list every rewarded quest on request; the answer
+        // (HandleQueryQuestsCompletedResponse) replaces the proxy's own turn-in record.
+        if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_3_0_10958))
+            SendPacket(new WorldPacket(Opcode.CMSG_QUERY_QUESTS_COMPLETED));
+
         bool isModernWotLK = ModernVersion.ExpansionVersion >= 3;
 
         // V3_4_3 modern client expects EmptyInitWorldStates BEFORE WorldServerInfo

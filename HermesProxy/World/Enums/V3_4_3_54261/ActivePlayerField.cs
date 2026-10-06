@@ -360,8 +360,10 @@ public enum ActivePlayerField
     [DescriptorCreatePlaceholder(DescriptorType.UInt32, Count = 7)]
     ACTIVEPLAYER_CREATE_BANK_BAG_SLOT_FLAGS_PLACEHOLDER,
 
-    // bit 637 (parent 636): QuestCompleted[875] — live property exists; TODO per-element read.
-    [DescriptorCreatePlaceholder(DescriptorType.UInt64, Count = 875)]
+    // bit 637 (parent 636): QuestCompleted[875] — the completed-quest bitfield the session's
+    // CompletedQuestTracker stamps onto the player's create; a zero fill here hid every completed quest.
+    [DescriptorCreatePlaceholder(DescriptorType.UInt64, Count = 875,
+        CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteCreateActivePlayerQuestCompleted))]
     ACTIVEPLAYER_CREATE_QUEST_COMPLETED_PLACEHOLDER,
 
     [DescriptorCreateField(nameof(ActivePlayerData.Honor), DescriptorType.Int32)]

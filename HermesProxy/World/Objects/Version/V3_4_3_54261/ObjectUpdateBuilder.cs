@@ -1044,6 +1044,15 @@ public partial class ObjectUpdateBuilder
         data.WriteUInt8(_gameState.GlyphsEnabled);
     }
 
+    // QuestCompleted[875], indexed by QuestV2.UniqueBitFlag (IsQuestFlaggedCompleted). Words the
+    // tracker did not set are zero.
+    internal void WriteCreateActivePlayerQuestCompleted(WorldPacket data, ActivePlayerData src)
+    {
+        ulong?[] words = src.QuestCompleted;
+        for (int i = 0; i < ActivePlayerData.QuestCompletedWords; i++)
+            data.WriteUInt64(words?[i] ?? 0uL);
+    }
+
     // NumStableSlots. A zero placeholder here makes every stable slot render locked even
     // after the player has paid for one, because the count reaches the client only through
     // ActivePlayerData (issue #224). Sourced from the legacy stable list.

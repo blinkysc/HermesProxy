@@ -1812,6 +1812,11 @@ internal static unsafe class GeneratedSmsgDispatch
         client.HandleQueryPlayerNameResponse(packet);
     }
 
+    private static void Thunk_HermesProxy_World_Client_WorldClient_HandleQueryQuestsCompletedResponse_SMSG_QUERY_QUESTS_COMPLETED_RESPONSE(global::HermesProxy.World.Client.WorldClient client, global::HermesProxy.World.WorldPacket packet)
+    {
+        client.HandleQueryQuestsCompletedResponse(packet);
+    }
+
     private static void Thunk_HermesProxy_World_Client_WorldClient_HandleQueryQuestInfoResponse_SMSG_QUERY_QUEST_INFO_RESPONSE(global::HermesProxy.World.Client.WorldClient client, global::HermesProxy.World.WorldPacket packet)
     {
         client.HandleQueryQuestInfoResponse(packet);
@@ -2698,6 +2703,7 @@ internal static unsafe class GeneratedSmsgDispatch
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_PETITION_RESPONSE] = &Thunk_HermesProxy_World_Client_WorldClient_HandlePetitionQueryResponse_SMSG_QUERY_PETITION_RESPONSE;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_PET_NAME_RESPONSE] = &Thunk_HermesProxy_World_Client_WorldClient_HandleQueryPetNameResponse_SMSG_QUERY_PET_NAME_RESPONSE;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_PLAYER_NAME_RESPONSE] = &Thunk_HermesProxy_World_Client_WorldClient_HandleQueryPlayerNameResponse_SMSG_QUERY_PLAYER_NAME_RESPONSE;
+        table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_QUESTS_COMPLETED_RESPONSE] = &Thunk_HermesProxy_World_Client_WorldClient_HandleQueryQuestsCompletedResponse_SMSG_QUERY_QUESTS_COMPLETED_RESPONSE;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_QUEST_INFO_RESPONSE] = &Thunk_HermesProxy_World_Client_WorldClient_HandleQueryQuestInfoResponse_SMSG_QUERY_QUEST_INFO_RESPONSE;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_TIME_RESPONSE] = &Thunk_HermesProxy_World_Client_WorldClient_HandleQueryTimeResponse_SMSG_QUERY_TIME_RESPONSE;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_QUEST_CONFIRM_ACCEPT] = &Thunk_HermesProxy_World_Client_WorldClient_HandleQuestConfirmAccept_SMSG_QUEST_CONFIRM_ACCEPT;
@@ -3143,6 +3149,7 @@ internal static unsafe class GeneratedSmsgDispatch
             global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_PETITION_RESPONSE,
             global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_PET_NAME_RESPONSE,
             global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_PLAYER_NAME_RESPONSE,
+            global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_QUESTS_COMPLETED_RESPONSE,
             global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_QUEST_INFO_RESPONSE,
             global::HermesProxy.World.Enums.Opcode.SMSG_QUERY_TIME_RESPONSE,
             global::HermesProxy.World.Enums.Opcode.SMSG_QUEST_CONFIRM_ACCEPT,

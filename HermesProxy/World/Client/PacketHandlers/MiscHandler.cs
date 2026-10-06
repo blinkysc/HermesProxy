@@ -1,4 +1,5 @@
 ﻿using Framework;
+using System.Collections.Generic;
 using HermesProxy.Enums;
 using HermesProxy.World.Dispatch;
 using HermesProxy.World.Enums;
@@ -19,6 +20,19 @@ public partial class WorldClient
         if ((serial & 0x80000000) != 0)
             return; // keepalive pong, don't forward to modern client
         SendPacketToClient(new Pong(serial));
+    }
+
+    // Answer to the CMSG_QUERY_QUESTS_COMPLETED sent at login: every quest the character has been
+    // rewarded for, including those done before using the proxy (which the modern client's
+    // QuestCompleted bitfield - IsQuestFlaggedCompleted, Questie, RestedXP - otherwise never learns).
+    [HandlesSmsg(Opcode.SMSG_QUERY_QUESTS_COMPLETED_RESPONSE)]
+    internal void HandleQueryQuestsCompletedResponse(WorldPacket packet)
+    {
+        uint count = packet.ReadUInt32();
+        var questIds = new List<uint>((int)Math.Min(count, 32768u));
+        for (uint i = 0; i < count; i++)
+            questIds.Add(packet.ReadUInt32());
+        GetSession().GameState.CurrentPlayerStorage.CompletedQuests.ReplaceAll(questIds);
     }
 
     [HandlesSmsg(Opcode.SMSG_TUTORIAL_FLAGS)]

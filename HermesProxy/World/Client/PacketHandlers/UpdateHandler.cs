@@ -666,6 +666,12 @@ public partial class WorldClient
 
                     TraceNpcBotCreateObject("CreateObject2", oldGuid, guid, updateData);
 
+                    // TrinityCore/AzerothCore 3.3.5a send the player's own object as CreateObject2
+                    // (Object::BuildCreateUpdateBlockForPlayer: TYPEMASK_PLAYER), cmangos as
+                    // CreateObject1 above - stamp the completed-quest set on either.
+                    if (updateData.Guid == GetSession().GameState.CurrentPlayerGuid)
+                        GetSession().GameState.CurrentPlayerStorage.CompletedQuests.WriteAllCompletedIntoArray(updateData.EnsureActivePlayerData());
+
                     if (guid.IsItem())
                     {
                         // A bag slot pointing at an item that has no CreateObject yet reads back as

@@ -173,6 +173,15 @@ public class AccountMetaDataManager
         return completedQuestIds;
     }
 
+    public void SetAllCompletedQuests(string realmName, string charName, IEnumerable<uint> questIds)
+    {
+        var dir = GetAccountCharacterMetaDataDirectory(realmName, charName);
+        var path = Path.Combine(dir, COMPLETED_QUESTS_FILE);
+
+        var when = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        File.WriteAllLines(path, questIds.Distinct().Select(q => $"{q},{when}"), Encoding.UTF8);
+    }
+
     public void MarkQuestAsCompleted(string realmName, string charName, uint questId)
     {
         var dir = GetAccountCharacterMetaDataDirectory(realmName, charName);

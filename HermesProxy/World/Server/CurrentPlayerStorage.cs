@@ -1,4 +1,6 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
+using Framework.Logging;
 using HermesProxy.World.Enums;
 using HermesProxy.World.Objects;
 using HermesProxy.World.Server.Packets;
@@ -107,6 +109,7 @@ public class PlayerSettings
 public class CompletedQuestTracker
 {
     private Dictionary<int, ulong> _cachedQuestCompleted = new();
+    private bool _playerCreated; // the client has the player object (WriteAllCompletedIntoArray ran)
 
     public GlobalSessionData Session { get; }
 
@@ -135,6 +138,34 @@ public class CompletedQuestTracker
         {
             SendSingleUpdateToClient(questBit.Value, true);
         }
+    }
+
+    /// <summary>
+    /// Replaces the whole set with the server's list (3.3.5a SMSG_QUERY_QUESTS_COMPLETED_RESPONSE),
+    /// saves it, and - if the client already has the player object - sends the words that changed.
+    /// Before that, the player's create update picks the new set up via WriteAllCompletedIntoArray.
+    /// </summary>
+    public void ReplaceAll(IReadOnlyCollection<uint> questIds)
+    {
+        Session.AccountMetaDataMgr.SetAllCompletedQuests(Session.GameState.CurrentPlayerInfo!.Realm.Name, Session.GameState.CurrentPlayerInfo!.Name!, questIds);
+
+        var old = _cachedQuestCompleted;
+        Reload();
+        var changed = old.Keys.Union(_cachedQuestCompleted.Keys)
+            .Where(k => old.GetValueOrDefault(k) != _cachedQuestCompleted.GetValueOrDefault(k))
+            .ToList();
+        Log.Print(LogType.Server, $"[Quests] server reports {questIds.Count} completed quests ({changed.Count} QuestCompleted words changed{(_playerCreated ? "" : ", applied at player create")})");
+        if (!_playerCreated || changed.Count == 0)
+            return;
+
+        ObjectUpdate updateData = new ObjectUpdate(Session.GameState.CurrentPlayerGuid, UpdateTypeModern.Values, Session);
+        ulong?[] words = updateData.EnsureActivePlayerData().EnsureQuestCompleted();
+        foreach (int idx in changed)
+            words[idx] = _cachedQuestCompleted.GetValueOrDefault(idx);
+
+        UpdateObject updatePacket = new UpdateObject(Session.GameState);
+        updatePacket.ObjectUpdates.Add(updateData);
+        Session.WorldClient!.SendPacketToClient(updatePacket);
     }
 
     public void Reload()
@@ -180,6 +211,7 @@ public class CompletedQuestTracker
     /// </summary>
     public void WriteAllCompletedIntoArray(ActivePlayerData dest)
     {
+        _playerCreated = true;
         if (_cachedQuestCompleted.Count == 0)
             return;
 
