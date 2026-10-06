@@ -58,6 +58,13 @@ public static class GuildSetMemberNoteCodec
     }
 }
 
+public static class GuildGetRanksCodec
+{
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Read(ref SpanPacketReader r, out GuildGetRanks packet)
+        => packet = new GuildGetRanks(r.ReadPackedGuid128());
+}
+
 public static class GuildPromoteMemberCodec
 {
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

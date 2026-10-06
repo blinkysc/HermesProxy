@@ -190,6 +190,9 @@ public partial class WorldClient
     [HandlesSmsg(Opcode.MSG_MOVE_HOVER)]
     [HandlesSmsg(Opcode.MSG_MOVE_FEATHER_FALL)]
     [HandlesSmsg(Opcode.MSG_MOVE_WATER_WALK)]
+    // TrinityCore/AzerothCore HandleMovementOpcodes relay a player's CMSG_MOVE_SET_FLY (flight
+    // started or stopped) to everyone nearby under its own opcode, with the MSG_MOVE_* layout.
+    [HandlesSmsg(Opcode.CMSG_MOVE_SET_FLY)]
     internal void HandleMovementMessages(WorldPacket packet)
     {
         var gameState = GetSession().GameState;
@@ -222,6 +225,25 @@ public partial class WorldClient
     internal static bool IsSplineDrivenMove(uint legacyFlags, ClientVersionBuild modernBuild) =>
         modernBuild == ClientVersionBuild.V3_4_3_54261 &&
         legacyFlags.HasAnyFlag((uint)MovementFlagWotLK.SplineEnabled);
+
+    // for other players: the server relays a CMSG_MOVE_TIME_SKIPPED, guid and time only
+    [HandlesSmsg(Opcode.MSG_MOVE_TIME_SKIPPED)]
+    internal void HandleMoveTimeSkipped(WorldPacket packet)
+    {
+        MoveSkipTime skip = new MoveSkipTime();
+        skip.MoverGUID = packet.ReadPackedGuid().To128(GetSession().GameState);
+        skip.TimeSkipped = packet.ReadUInt32();
+        SendPacketToClient(skip);
+    }
+
+    // Another player's collision height after their client acked a mount change. Deliberately
+    // dropped: AfterStoreObjectUpdateHook already sends every player's height and scale, computed
+    // from the mount and scale fields of the same change, and this one would repeat it with the
+    // legacy client's model data.
+    [HandlesSmsg(Opcode.MSG_MOVE_SET_COLLISION_HGT)]
+    internal void HandleMoveSetCollisionHeight(WorldPacket packet)
+    {
+    }
 
     [HandlesSmsg(Opcode.MSG_MOVE_KNOCK_BACK)]
     internal void HandleMoveKnockBack(WorldPacket packet)

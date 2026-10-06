@@ -34,6 +34,33 @@ namespace HermesProxy.World.Server.Packets;
 /// </summary>
 public readonly record struct EmptyClientPacket;
 
+/// <summary>
+/// A CMSG the proxy drops unread, whatever its payload: the modern client sends it for something
+/// a legacy server has no part in (the shop, telemetry, a later expansion's feature).
+/// </summary>
+public readonly record struct UnsupportedClientPacket;
+
+public class CalendarSendNumPending : ServerPacket, ISpanWritable
+{
+    public CalendarSendNumPending() : base(Opcode.SMSG_CALENDAR_SEND_NUM_PENDING) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt32(NumPending);
+    }
+
+    public int MaxSize => 4; // uint
+
+    public int WriteToSpan(Span<byte> buffer)
+    {
+        var writer = new SpanPacketWriter(buffer);
+        writer.WriteUInt32(NumPending);
+        return writer.Position;
+    }
+
+    public uint NumPending;
+}
+
 public class BindPointUpdate : ServerPacket, ISpanWritable
 {
     public BindPointUpdate() : base(Opcode.SMSG_BIND_POINT_UPDATE, ConnectionType.Instance) { }

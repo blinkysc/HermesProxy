@@ -687,6 +687,8 @@ public readonly record struct GuildSetMemberNote(WowGuid128 NoteeGUID, bool IsPu
 
 public readonly record struct GuildPromoteMember(WowGuid128 Promotee);
 
+public readonly record struct GuildGetRanks(WowGuid128 GuildGuid);
+
 public readonly record struct GuildDemoteMember(WowGuid128 Demotee);
 
 public readonly record struct GuildOfficerRemoveMember(WowGuid128 Removee);

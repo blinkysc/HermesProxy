@@ -576,6 +576,31 @@ public class MoveUpdateSpeed : ServerPacket, ISpanWritable
     public float Speed = 1.0f;
 }
 
+// for other players: the mover's client skipped this much time (a hitch or a loading screen)
+public class MoveSkipTime : ServerPacket, ISpanWritable
+{
+    public MoveSkipTime() : base(Opcode.SMSG_MOVE_SKIP_TIME, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(MoverGUID);
+        _worldPacket.WriteUInt32(TimeSkipped);
+    }
+
+    public int MaxSize => PackedGuidHelper.MaxPackedGuid128Size + 4; // GUID + uint
+
+    public int WriteToSpan(Span<byte> buffer)
+    {
+        var writer = new SpanPacketWriter(buffer);
+        writer.WritePackedGuid128(MoverGUID.Low, MoverGUID.High);
+        writer.WriteUInt32(TimeSkipped);
+        return writer.Position;
+    }
+
+    public WowGuid128 MoverGUID;
+    public uint TimeSkipped;
+}
+
 public class MoveSplineSetFlag : ServerPacket, ISpanWritable
 {
     public MoveSplineSetFlag(Opcode opcode) : base(opcode, ConnectionType.Instance) { }

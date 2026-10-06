@@ -196,6 +196,29 @@ internal static class MovementScenarios
                 MoverThenMove(Opcode.MSG_MOVE_SET_WALK_SPEED, OtherPlayer, NeedsRepair, p => p.WriteFloat(2.5f)),
                 c => c.HandleMoveUpdateSpeed);
         }
+
+        // A server relays another player's CMSG_MOVE_SET_FLY under its own opcode.
+        if (Mapped(Opcode.CMSG_MOVE_SET_FLY))
+        {
+            yield return new("set-fly-relay/flying", Opcode.CMSG_MOVE_SET_FLY,
+                MoverThenMove(Opcode.CMSG_MOVE_SET_FLY, OtherPlayer,
+                    new LegacyMove { Flags = MovementFlagWotLK.Flying | MovementFlagWotLK.CanFly, Pitch = 0.25f }),
+                c => c.HandleMovementMessages);
+            yield return new("set-fly-relay/falling-on-boat", Opcode.CMSG_MOVE_SET_FLY,
+                MoverThenMove(Opcode.CMSG_MOVE_SET_FLY, OtherPlayer, FallingOnBoat),
+                c => c.HandleMovementMessages);
+        }
+
+        if (Mapped(Opcode.MSG_MOVE_TIME_SKIPPED))
+        {
+            yield return new("time-skipped", Opcode.MSG_MOVE_TIME_SKIPPED,
+                LegacyPacketBuilder.Build(Opcode.MSG_MOVE_TIME_SKIPPED, p =>
+                {
+                    p.WritePackedGuid(OtherPlayer);
+                    p.WriteUInt32(1500);
+                }),
+                c => c.HandleMoveTimeSkipped);
+        }
     }
 
     // ---- legacy creates ------------------------------------------------------------------

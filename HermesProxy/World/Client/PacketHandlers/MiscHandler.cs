@@ -35,6 +35,22 @@ public partial class WorldClient
         GetSession().GameState.CurrentPlayerStorage.CompletedQuests.ReplaceAll(questIds);
     }
 
+    // Answer to CMSG_CALENDAR_GET_NUM_PENDING: the invites waiting on the minimap calendar button.
+    [HandlesSmsg(Opcode.SMSG_CALENDAR_SEND_NUM_PENDING)]
+    internal void HandleCalendarSendNumPending(WorldPacket packet)
+    {
+        CalendarSendNumPending pending = new CalendarSendNumPending();
+        pending.NumPending = packet.ReadUInt32();
+        SendPacketToClient(pending);
+    }
+
+    // Sent at login with both words zero. 3.3.5a never shipped learnable dances and the modern
+    // client has no such packet.
+    [HandlesSmsg(Opcode.SMSG_LEARNED_DANCE_MOVES)]
+    internal void HandleLearnedDanceMoves(WorldPacket packet)
+    {
+    }
+
     [HandlesSmsg(Opcode.SMSG_TUTORIAL_FLAGS)]
     internal void HandleTutorialFlags(WorldPacket packet)
     {

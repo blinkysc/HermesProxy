@@ -35,6 +35,13 @@ public partial class WorldClient
         SendPacketToClient(new LFGDisabled());
     }
 
+    // 3.3.5a Raid Browser (LFR) "listed / not listed" flag. The modern client has no Raid Browser
+    // and no packet that carries it, so there is nothing to translate it into.
+    [HandlesSmsg(Opcode.SMSG_LFG_UPDATE_SEARCH)]
+    internal void HandleLFGUpdateSearch(WorldPacket packet)
+    {
+    }
+
     [HandlesSmsg(Opcode.SMSG_LFG_OFFER_CONTINUE)]
     internal void HandleLFGOfferContinue(WorldPacket packet)
     {

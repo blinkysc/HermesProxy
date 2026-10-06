@@ -143,3 +143,11 @@ public static class EmptyClientPacketCodec
         packet = default;
     }
 }
+
+public static class UnsupportedClientPacketCodec
+{
+    /// <remarks>No payload is read, and leftover bytes are expected: the packet is dropped.</remarks>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Read(ref SpanPacketReader r, out UnsupportedClientPacket packet)
+        => packet = default;
+}

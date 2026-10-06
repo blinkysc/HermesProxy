@@ -70,6 +70,18 @@ public static class GuildSystem
         ctx.SendPacketToServer(packet2);
     }
 
+    /// <remarks>
+    /// Legacy has no rank request: the ranks come with the roster, and
+    /// <c>WorldClient.HandleGuildRoster</c> sends them on as SMSG_GUILD_RANKS. Only the player's
+    /// own guild can be asked for, so the GUID is not needed.
+    /// </remarks>
+    [HandlesCmsg(Opcode.CMSG_GUILD_GET_RANKS)]
+    public static void HandleGuildGetRanks(in GuildGetRanks query, in SessionContext ctx)
+    {
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_GUILD_GET_ROSTER);
+        ctx.SendPacketToServer(packet);
+    }
+
     [HandlesCmsg(Opcode.CMSG_GUILD_UPDATE_MOTD_TEXT)]
     public static void HandleGuildUpdateMotdText(in GuildUpdateMotdText text, in SessionContext ctx)
     {

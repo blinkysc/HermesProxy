@@ -223,4 +223,14 @@ internal static partial class WorldSocketLogMessages
         int Bytes,
         uint NumObjUpdates,
         ushort MapId);
+
+    [LoggerMessage(
+        EventId = 122,
+        Level = LogLevel.Debug,
+        Message = "Dropped {Opcode}: no legacy equivalent")]
+    public static partial void UnsupportedClientPacketDropped(
+        ILogger logger,
+        string SourceFile,
+        string NetDir,
+        Opcode Opcode);
 }

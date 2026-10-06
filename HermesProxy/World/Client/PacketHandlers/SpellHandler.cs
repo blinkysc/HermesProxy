@@ -1405,6 +1405,7 @@ public partial class WorldClient
     }
 
     [HandlesSmsg(Opcode.SMSG_PLAY_SPELL_VISUAL)]
+    [HandlesSmsg(Opcode.SMSG_PLAY_SPELL_IMPACT)] // same layout, the guid is the target's
     internal void HandlePlaySpellVisualKit(WorldPacket packet)
     {
         PlaySpellVisualKit spell = new();
