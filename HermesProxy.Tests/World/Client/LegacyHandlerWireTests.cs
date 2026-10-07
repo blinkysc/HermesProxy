@@ -106,6 +106,26 @@ public class LegacyHandlerWireTests
         Assert.Empty(go.Cast.HitTargets);
     }
 
+    [Fact]
+    public void RepeatedInstantCasts_GetDistinctCastIds_AndAStartMatchesItsGo()
+    {
+        // Penance: the server fires the bolt spell three times while the channel runs. The client
+        // tracks a missile by its cast id, so a repeat id folded a bolt still in flight into the
+        // next one and only two of three were drawn.
+        for (int i = 0; i < 3; i++)
+            _harness.Deliver(Opcode.SMSG_SPELL_GO, _scenario.BuildSpellGo(), _harness.Client.HandleSpellGo);
+        var boltIds = _harness.ClientWire.Sent.Select(s => Assert.IsType<SpellGo>(s.Packet).Cast.CastID).ToList();
+        Assert.Equal(3, boltIds.Distinct().Count());
+
+        _harness.ClientWire.Sent.Clear();
+        _harness.Deliver(Opcode.SMSG_SPELL_START, _scenario.BuildSpellStart(), _harness.Client.HandleSpellStart);
+        _harness.Deliver(Opcode.SMSG_SPELL_GO, _scenario.BuildSpellGo(), _harness.Client.HandleSpellGo);
+        var start = _harness.ClientWire.Sent.Select(s => s.Packet).OfType<SpellStart>().Single();
+        var go = _harness.ClientWire.Sent.Select(s => s.Packet).OfType<SpellGo>().Single();
+        Assert.Equal(start.Cast.CastID, go.Cast.CastID);
+        Assert.DoesNotContain(go.Cast.CastID, boltIds);
+    }
+
     private static readonly string[] ValuesBatchGolden =
     [
         "SMSG_POWER_UPDATE:01A0010408010000007210000000",
@@ -114,11 +134,11 @@ public class LegacyHandlerWireTests
 
     private static readonly string[] SpellStartGolden =
     [
-        "SMSG_SPELL_START:01A764800B0D042001A764800B0D042001BBE94321C00304BC000085000000000000000000000000000000AC0D000000000000000000000000000000000000000000000000000000000000000000000000000000800001A00204080000",
+        "SMSG_SPELL_START:01A764800B0D042001A764800B0D042001BB014321C00304BC000085000000000000000000000000000000AC0D000000000000000000000000000000000000000000000000000000000000000000000000000000800001A00204080000",
     ];
 
     private static readonly string[] SpellGoGolden =
     [
-        "SMSG_SPELL_GO:01A764800B0D042001A764800B0D042001BBE94321C00304BC00008500000000000000000000000000000040E2010000000000000000000000000000000000000000000000000000010000000000000000000000800001A0020408000001A002040800",
+        "SMSG_SPELL_GO:01A764800B0D042001A764800B0D042001BB014321C00304BC00008500000000000000000000000000000040E2010000000000000000000000000000000000000000000000000000010000000000000000000000800001A0020408000001A002040800",
     ];
 }

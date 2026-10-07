@@ -422,7 +422,7 @@ public partial class WorldClient
         }
         else
         {
-            castId = WowGuid128.Create(HighGuidType703.Cast, SpellCastSource.Normal, (uint)GetSession().GameState.CurrentMapId!, spellId, spellId + casterUnit.GetCounter());
+            castId = GetSession().GameState.CurrentSyntheticCast(casterUnit, spellId);
             spellVisual = GameData.GetSpellVisual(spellId);
         }
 
@@ -590,6 +590,7 @@ public partial class WorldClient
 
         SpellGo spell = new SpellGo();
         spell.Cast = HandleSpellStartOrGo(packet, true);
+        uint legacySpellId = (uint)spell.Cast.SpellID; // as the damage log will name it
 
         // Dequeue completed cast (queue-based, FIFO order)
         if (GetSession().GameState.CurrentPlayerGuid == spell.Cast.CasterUnit &&
@@ -672,6 +673,9 @@ public partial class WorldClient
 
         ApplyV343NativeCastPolicy(spell.Cast, isSpellGo: true);
         SendPacketToClient(spell);
+        // A damage log for this cast has to carry the id the client got, which for the player's
+        // or pet's own cast is the client's, not the synthetic one.
+        GetSession().GameState.NoteFinishedCast(spell.Cast.CasterUnit, legacySpellId, spell.Cast.CastID);
 
         if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261
             && GetSession().GameState.CurrentPlayerGuid == spell.Cast.CasterUnit
@@ -717,7 +721,10 @@ public partial class WorldClient
 
         dbdata.SpellID = packet.ReadInt32();
         dbdata.SpellXSpellVisualID = GameData.GetSpellVisual((uint)dbdata.SpellID);
-        dbdata.CastID = WowGuid128.Create(HighGuidType703.Cast, SpellCastSource.Normal, (uint)GetSession().GameState.CurrentMapId!, (uint)dbdata.SpellID, (ulong)dbdata.SpellID + dbdata.CasterUnit.GetCounter());
+        // Replaced by the client's own cast id below when this is a cast the player or pet asked for.
+        dbdata.CastID = isSpellGo
+            ? GetSession().GameState.FinishSyntheticCast(dbdata.CasterUnit, (uint)dbdata.SpellID)
+            : GetSession().GameState.BeginSyntheticCast(dbdata.CasterUnit, (uint)dbdata.SpellID);
 
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180) && LegacyVersion.RemovedInVersion(ClientVersionBuild.V3_0_2_9056) && !isSpellGo)
             packet.ReadUInt8(); // cast count
@@ -1066,7 +1073,7 @@ public partial class WorldClient
         spell.CasterGUID = packet.ReadPackedGuid().To128(GetSession().GameState);
         spell.SpellID = packet.ReadUInt32();
         spell.SpellXSpellVisualID = GameData.GetSpellVisual(spell.SpellID);
-        spell.CastID = WowGuid128.Create(HighGuidType703.Cast, SpellCastSource.Normal, (uint)GetSession().GameState.CurrentMapId!, spell.SpellID, spell.SpellID + spell.CasterGUID.GetCounter());
+        spell.CastID = GetSession().GameState.CurrentSyntheticCast(spell.CasterGUID, spell.SpellID);
         spell.Damage = packet.ReadInt32();
         spell.OriginalDamage = spell.Damage;
 

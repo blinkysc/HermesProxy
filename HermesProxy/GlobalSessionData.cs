@@ -656,6 +656,61 @@ public sealed class GameSessionData
     // only signal the proxy has that the association is over.
     public bool LastGroupWasLfg;
 
+    // Cast ids for casts the client did not request (other units' casts, server-triggered spells
+    // such as Penance's bolts). A native server gives every cast its own id, and the client tracks
+    // a missile in flight by it: ids derived from the spell and caster alone were the same for
+    // every repeat, so a second bolt fired while the first was still flying was folded into it.
+    // A cast's start, finish and interruption share one id; a damage log takes the latest.
+    private readonly Dictionary<(WowGuid128 Caster, uint SpellId), WowGuid128> _openSyntheticCasts = [];
+    private readonly Dictionary<(WowGuid128 Caster, uint SpellId), WowGuid128> _lastSyntheticCasts = [];
+    private ulong _syntheticCastSequence;
+    private const int MaxSyntheticCasts = 4096;
+
+    private WowGuid128 NewSyntheticCastId(uint spellId)
+    {
+        if (_lastSyntheticCasts.Count > MaxSyntheticCasts)
+            _lastSyntheticCasts.Clear();
+        if (_openSyntheticCasts.Count > MaxSyntheticCasts)
+            _openSyntheticCasts.Clear();
+        return WowGuid128.Create(HighGuidType703.Cast, SpellCastSource.Normal, CurrentMapId ?? 0, spellId, ++_syntheticCastSequence);
+    }
+
+    /// <summary>SPELL_START: the cast's id, kept until it finishes or is interrupted.</summary>
+    public WowGuid128 BeginSyntheticCast(WowGuid128 caster, uint spellId)
+    {
+        var key = (caster, spellId);
+        if (!_openSyntheticCasts.TryGetValue(key, out var castId))
+            _openSyntheticCasts[key] = castId = NewSyntheticCastId(spellId);
+        return castId;
+    }
+
+    /// <summary>SPELL_GO: the started cast's id, or a fresh one for an instant cast.</summary>
+    public WowGuid128 FinishSyntheticCast(WowGuid128 caster, uint spellId)
+    {
+        var key = (caster, spellId);
+        if (_openSyntheticCasts.Remove(key, out var castId))
+            return _lastSyntheticCasts[key] = castId;
+        return _lastSyntheticCasts[key] = NewSyntheticCastId(spellId);
+    }
+
+    public void NoteFinishedCast(WowGuid128 caster, uint spellId, WowGuid128 castId)
+        => _lastSyntheticCasts[(caster, spellId)] = castId;
+
+    /// <summary>
+    /// The cast an interruption or a damage log refers to: the open one, else the latest. The
+    /// server reports an interruption twice (SPELL_FAILURE and SPELL_FAILED_OTHER), so both
+    /// have to resolve to the same cast.
+    /// </summary>
+    public WowGuid128 CurrentSyntheticCast(WowGuid128 caster, uint spellId)
+    {
+        var key = (caster, spellId);
+        if (_openSyntheticCasts.Remove(key, out var castId))
+            return _lastSyntheticCasts[key] = castId;
+        if (_lastSyntheticCasts.TryGetValue(key, out castId))
+            return castId;
+        return _lastSyntheticCasts[key] = NewSyntheticCastId(spellId);
+    }
+
     /// <summary>A creature or vehicle in view whose template name is exactly <paramref name="name"/>.</summary>
     public WowGuid128 FindVisibleCreatureByName(string name)
     {
