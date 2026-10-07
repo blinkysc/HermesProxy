@@ -2974,6 +2974,10 @@ public partial class WorldClient
             }
         }
 
+        // Set by the UNIT_FIELD_BYTES_0 read when a player's race or sex differs from the last one
+        // seen, so the player section can rebuild customizations that are keyed on both.
+        bool raceOrSexChanged = false;
+
         // Unit Fields
         if ((objectType == ObjectType.Unit) ||
             (objectType == ObjectType.Player) ||
@@ -3058,6 +3062,16 @@ public partial class WorldClient
                 updateData.UnitData.ClassId = (byte)((updates[UNIT_FIELD_BYTES_0].UInt32Value >> 8) & 0xFF);
                 updateData.UnitData.SexId = (byte)((updates[UNIT_FIELD_BYTES_0].UInt32Value >> 16) & 0xFF);
                 updateData.UnitData.DisplayPower = (byte)((updates[UNIT_FIELD_BYTES_0].UInt32Value >> 24) & 0xFF);
+
+                // Read before the cache takes the new bytes: the customization rebuild in the
+                // player section needs to know the race or sex moved under it.
+                if (!isCreate && (objectType == ObjectType.Player || objectType == ObjectType.ActivePlayer))
+                {
+                    raceOrSexChanged =
+                        !GetSession().GameState.CachedPlayers.TryGetValue(guid, out var previous) ||
+                        previous.RaceId != (Race)updateData.UnitData.RaceId ||
+                        previous.SexId != (Gender)updateData.UnitData.SexId;
+                }
 
                 if (objectType == ObjectType.Player)
                 {
@@ -3864,22 +3878,25 @@ public partial class WorldClient
             // A barber change dirties PLAYER_BYTES and PLAYER_BYTES_2 independently — the legacy
             // server only marks the one whose bytes actually moved. Both halves are needed to
             // rebuild the modern choice list, so fill whichever is absent from the cached fields.
-            if ((skin != null) != (facialHair != null))
+            // A race or sex change moves neither (mod-cfbg turns a Horde player sent to the
+            // Alliance side into an Alliance race through UNIT_FIELD_BYTES_0 alone), yet the
+            // choice IDs belong to one race and sex, so it needs both halves as well.
+            if ((skin != null) != (facialHair != null) || raceOrSexChanged)
             {
                 var cached = GetSession().GameState.GetCachedObjectFieldsLegacy(guid.To128(GetSession().GameState));
                 if (cached != null)
                 {
-                    if (skin == null && PLAYER_BYTES >= 0)
+                    if (skin == null && PLAYER_BYTES >= 0 && cached.TryGetValue(PLAYER_BYTES, out var bytesField))
                     {
-                        uint bytes = cached[PLAYER_BYTES].UInt32Value;
+                        uint bytes = bytesField.UInt32Value;
                         skin = (byte)(bytes & 0xFF);
                         face = (byte)((bytes >> 8) & 0xFF);
                         hairStyle = (byte)((bytes >> 16) & 0xFF);
                         hairColor = (byte)((bytes >> 24) & 0xFF);
                     }
-                    else if (facialHair == null && PLAYER_BYTES_2 >= 0)
+                    if (facialHair == null && PLAYER_BYTES_2 >= 0 && cached.TryGetValue(PLAYER_BYTES_2, out var bytes2Field))
                     {
-                        facialHair = (byte)(cached[PLAYER_BYTES_2].UInt32Value & 0xFF);
+                        facialHair = (byte)(bytes2Field.UInt32Value & 0xFF);
                     }
                 }
             }

@@ -5840,11 +5840,21 @@ public static class CharacterCustomizations
     {
         return new List<ChrCustomizationChoice>(5)
         {
-            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.Skin), GetModernCustomizationChoice(raceId, gender, LegacyCustomizationOption.Skin, skin)),
-            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.Face), GetModernCustomizationChoice(raceId, gender, LegacyCustomizationOption.Face, face)),
-            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.HairStyle), GetModernCustomizationChoice(raceId, gender, LegacyCustomizationOption.HairStyle, hairStyle)),
-            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.HairColor), GetModernCustomizationChoice(raceId, gender, LegacyCustomizationOption.HairColor, hairColor)),
-            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.FacialHair), GetModernCustomizationChoice(raceId, gender, LegacyCustomizationOption.FacialHair, facialHair))
+            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.Skin), GetModernCustomizationChoiceOrFirst(raceId, gender, LegacyCustomizationOption.Skin, skin)),
+            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.Face), GetModernCustomizationChoiceOrFirst(raceId, gender, LegacyCustomizationOption.Face, face)),
+            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.HairStyle), GetModernCustomizationChoiceOrFirst(raceId, gender, LegacyCustomizationOption.HairStyle, hairStyle)),
+            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.HairColor), GetModernCustomizationChoiceOrFirst(raceId, gender, LegacyCustomizationOption.HairColor, hairColor)),
+            new(GetModernCustomizationOption(raceId, gender, LegacyCustomizationOption.FacialHair), GetModernCustomizationChoiceOrFirst(raceId, gender, LegacyCustomizationOption.FacialHair, facialHair))
         };
+    }
+
+    // The legacy bytes are indexes into the race's own option list, and a race swap keeps them:
+    // mod-cfbg morphs a Tauren into a Human without touching PLAYER_BYTES, so a skin or hair
+    // index can run past what the new race has. Choice 0 is no record at all, so take the
+    // race's first choice instead.
+    static uint GetModernCustomizationChoiceOrFirst(Race raceId, Gender gender, LegacyCustomizationOption option, byte value)
+    {
+        uint choice = GetModernCustomizationChoice(raceId, gender, option, value);
+        return choice != 0 || value == 0 ? choice : GetModernCustomizationChoice(raceId, gender, option, 0);
     }
 }
