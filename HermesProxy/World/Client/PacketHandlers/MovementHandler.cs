@@ -252,10 +252,13 @@ public partial class WorldClient
         SendPacketToClient(skip);
     }
 
-    // Another player's collision height after their client acked a mount change. Deliberately
-    // dropped: AfterStoreObjectUpdateHook already sends every player's height and scale, computed
-    // from the mount and scale fields of the same change, and this one would repeat it with the
-    // legacy client's model data.
+    // Collision height on a mount change: SMSG for our own player (Unit::Mount/Dismount), MSG for
+    // another player once their client acked it. Deliberately dropped: AfterStoreObjectUpdateHook
+    // already sends every player's height and scale, computed from the mount and scale fields of
+    // the same change, and this one would repeat it with the legacy client's model data. The
+    // server needs no ack for ours: AzerothCore only uses the move counter to order map changes,
+    // and MovementSystem discards the client's ack of the proxy's own packet.
+    [HandlesSmsg(Opcode.SMSG_MOVE_SET_COLLISION_HGT)]
     [HandlesSmsg(Opcode.MSG_MOVE_SET_COLLISION_HGT)]
     internal void HandleMoveSetCollisionHeight(WorldPacket packet)
     {
