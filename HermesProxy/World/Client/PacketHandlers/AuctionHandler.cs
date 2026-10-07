@@ -55,7 +55,12 @@ public partial class WorldClient
                 enchant.Charges = packet.ReadInt32();
             }
             if (enchant.ID != 0)
+            {
                 item.Enchantments.Add(enchant);
+                var gem = GameData.GemFromLegacyEnchantSlot(j, enchant.ID);
+                if (gem != null)
+                    item.Gems.Add(gem);
+            }
         }
 
         item.Item.RandomPropertiesID = packet.ReadUInt32();

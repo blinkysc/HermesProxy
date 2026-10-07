@@ -19,6 +19,16 @@ namespace HermesProxy.World.Server.Systems;
 /// </remarks>
 public static class PetSystem
 {
+    [HandlesCmsg(Opcode.CMSG_PET_SPELL_AUTOCAST)]
+    public static void HandlePetSpellAutocast(in PetSpellAutocast autocast, in SessionContext ctx)
+    {
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_PET_SPELL_AUTOCAST);
+        packet.WriteGuid(autocast.PetGUID.To64(ctx.GetSession().GameState));
+        packet.WriteUInt32(autocast.SpellID);
+        packet.WriteBool(autocast.AutocastEnabled);
+        ctx.SendPacketToServer(packet);
+    }
+
     [HandlesCmsg(Opcode.CMSG_PET_ACTION)]
     public static void HandlePetAction(in PetAction act, in SessionContext ctx)
     {

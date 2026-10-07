@@ -1709,3 +1709,88 @@ public class SetPlayerDeclinedNamesResult : ServerPacket
     public int ResultCode;
     public WowGuid128 Player;
 }
+
+public readonly record struct CharCustomize(WowGuid128 CharGuid, Gender SexId, string CharName, List<ChrCustomizationChoice> Customizations);
+
+public class CharCustomizeFailure : ServerPacket
+{
+    public byte Result;
+    public WowGuid128 CharGUID;
+
+    public CharCustomizeFailure() : base(Opcode.SMSG_CHAR_CUSTOMIZE_FAILURE) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt8(Result);
+        _worldPacket.WritePackedGuid128(CharGUID);
+    }
+}
+
+public class CharCustomizeSuccess : ServerPacket
+{
+    public WowGuid128 CharGUID;
+    public Gender SexID;
+    public string CharName = "";
+    public List<ChrCustomizationChoice> Customizations = new List<ChrCustomizationChoice>();
+
+    public CharCustomizeSuccess() : base(Opcode.SMSG_CHAR_CUSTOMIZE_SUCCESS) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(CharGUID);
+        _worldPacket.WriteUInt8((byte)SexID);
+        _worldPacket.WriteUInt32((uint)Customizations.Count);
+        foreach (ChrCustomizationChoice customization in Customizations)
+        {
+            _worldPacket.WriteUInt32(customization.ChrCustomizationOptionID);
+            _worldPacket.WriteUInt32(customization.ChrCustomizationChoiceID);
+        }
+        _worldPacket.WriteBits(CharName.GetByteCount(), 6);
+        _worldPacket.FlushBits();
+        _worldPacket.WriteString(CharName);
+    }
+}
+
+public class CharFactionChangeResult : ServerPacket
+{
+    public class CharFactionChangeDisplayInfo
+    {
+        public string Name = "";
+
+        public Gender SexID;
+
+        public Race RaceID;
+
+        public List<ChrCustomizationChoice> Customizations = new List<ChrCustomizationChoice>();
+    }
+
+    public byte Result;
+    public WowGuid128 Guid;
+    public CharFactionChangeDisplayInfo? Display;
+
+    public CharFactionChangeResult() : base(Opcode.SMSG_CHAR_FACTION_CHANGE_RESULT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt8(Result);
+        _worldPacket.WritePackedGuid128(Guid);
+        _worldPacket.WriteBit(Display != null);
+        _worldPacket.FlushBits();
+        if (Display == null)
+        {
+            return;
+        }
+        _worldPacket.WriteBits(Display.Name.GetByteCount(), 6);
+        _worldPacket.WriteUInt8((byte)Display.SexID);
+        _worldPacket.WriteUInt8((byte)Display.RaceID);
+        _worldPacket.WriteUInt32((uint)Display.Customizations.Count);
+        _worldPacket.WriteString(Display.Name);
+        foreach (ChrCustomizationChoice customization in Display.Customizations)
+        {
+            _worldPacket.WriteUInt32(customization.ChrCustomizationOptionID);
+            _worldPacket.WriteUInt32(customization.ChrCustomizationChoiceID);
+        }
+    }
+}
+
+public readonly record struct CharRaceOrFactionChange(bool FactionChange, WowGuid128 Guid, Gender SexId, Race RaceId, Race InitialRaceId, string Name, List<ChrCustomizationChoice> Customizations);

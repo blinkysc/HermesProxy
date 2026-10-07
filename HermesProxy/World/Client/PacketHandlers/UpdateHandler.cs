@@ -191,6 +191,7 @@ public partial class WorldClient
             GetSession().GameState.ObjectCacheModern.Remove(guid);
         }
         GetSession().GameState.LastAuraCasterOnTarget.Remove(guid);
+        ForgetKnownAuras(guid);
         GetSession().GameState.VehicleRecIds.Remove(guid);
         // The client is about to drop this object, so it must stop counting as "known".
         // ClientKnownGuids gates Values forwarding in FilterV3_4_3Values; leaving a
@@ -243,6 +244,7 @@ public partial class WorldClient
             GetSession().GameState.ObjectCacheModern.Remove(guid);
         }
         GetSession().GameState.LastAuraCasterOnTarget.Remove(guid);
+        ForgetKnownAuras(guid);
         GetSession().GameState.VehicleRecIds.Remove(guid);
         bool wasKnown = GetSession().GameState.ClientKnownGuids.Remove(guid);
         ForgetPetObjectIfLost(guid, wasKnown);
@@ -550,7 +552,7 @@ public partial class WorldClient
                         ObjectUpdate updateData2 = new ObjectUpdate(guid, UpdateTypeModern.Values, GetSession());
                         updateData2.EnsureActivePlayerData().FarsightObject = WowGuid128.Empty;
                         updateObject2.ObjectUpdates.Add(updateData2);
-                        SendPacketToClient(updateObject2);
+                        SendPlayerValuesUpdate(updateObject2);
                     }
 
                     ObjectUpdate updateData = new ObjectUpdate(guid, UpdateTypeModern.CreateObject1, GetSession());
@@ -767,6 +769,7 @@ public partial class WorldClient
             ResyncItemQuestCredits();
             RefreshCurrencies();
             CollectionSync.RefreshUsableToys(GetSession());
+            CollectionSync.RefreshHeirlooms(GetSession());
         }
 
         if (missingItemTemplates != null)
@@ -959,7 +962,14 @@ public partial class WorldClient
     /// these for an unknown guid, so this is the one place that decides what happens to an update
     /// that lands while the player's create is still on its way (issue #300).
     /// </summary>
-    void SendPlayerValuesUpdate(UpdateObject playerValues)
+    // Aura state the proxy diffs against; a unit that leaves the client's view comes back with none.
+    private void ForgetKnownAuras(WowGuid128 guid)
+    {
+        if (guid != GetSession().GameState.CurrentPlayerGuid)
+            GetSession().GameState.KnownAuras.Remove(guid);
+    }
+
+    internal void SendPlayerValuesUpdate(UpdateObject playerValues)
     {
         var session = GetSession();
         WowGuid128 playerGuid = session.GameState.CurrentPlayerGuid;
@@ -1083,6 +1093,20 @@ public partial class WorldClient
             if (transportCreates != 0 && Log.IsTraceEnabled)
                 Log.Print(LogType.Trace,
                     $"[UpdateObjectTrace] V3_4_3 CreateObject split: hoisted {transportCreates} transport create(s) ahead of {createsToSplit.Count - transportCreates} other create(s)");
+
+            // An object that left view and came back in the same packet: its destroy has to reach
+            // the client before the new create, or the client drops the create as a duplicate and
+            // then destroys the object.
+            if ((updateObject.OutOfRangeGuids.Count != 0 || updateObject.DestroyedGuids.Count != 0)
+                && createsToSplit.Exists(c => updateObject.OutOfRangeGuids.Contains(c.Guid) || updateObject.DestroyedGuids.Contains(c.Guid)))
+            {
+                UpdateObject removals = new UpdateObject(GetSession().GameState);
+                removals.OutOfRangeGuids.AddRange(updateObject.OutOfRangeGuids);
+                removals.DestroyedGuids.AddRange(updateObject.DestroyedGuids);
+                updateObject.OutOfRangeGuids.Clear();
+                updateObject.DestroyedGuids.Clear();
+                SendPacketToClient(removals);
+            }
 
             foreach (var create in createsToSplit)
             {
@@ -1263,6 +1287,7 @@ public partial class WorldClient
                 GetSession().GameState.ObjectCacheModern.Remove(guid);
             }
             GetSession().GameState.LastAuraCasterOnTarget.Remove(guid);
+            ForgetKnownAuras(guid);
             GetSession().GameState.VehicleRecIds.Remove(guid);
 
             // If the pet is too far away, sends a SMSG_UPDATE_OBJECT protocol
@@ -1900,7 +1925,9 @@ public partial class WorldClient
                 if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
                 {
                     SplineFlagWotLK splineFlags = (SplineFlagWotLK)packet.ReadUInt32();
-                    monsterMove.SplineFlags = splineFlags.CastFlags<SplineFlagWotLK, SplineFlagModern>()
+                    // The create's spline block has no anim tier or jump data to back those two flags.
+                    monsterMove.SplineFlags = (SplineFlagTranslation.ToModern(splineFlags)
+                                               & ~(SplineFlagModern.Animation | SplineFlagModern.Parabolic))
                                               | SplineFlagTranslation.SeatMoveFlags(splineFlags);
                     isFlyingSpline = SplineFlagTranslation.IsServerFlight(splineFlags);
                     isSmoothSpline = SplineFlagTranslation.IsSmoothPath(splineFlags);
@@ -2754,6 +2781,12 @@ public partial class WorldClient
             if (ITEM_FIELD_DURATION >= 0 && updateMaskArray[ITEM_FIELD_DURATION])
             {
                 updateData.ItemData.Duration = updates[ITEM_FIELD_DURATION].UInt32Value;
+            }
+            int ITEM_FIELD_CREATE_PLAYED_TIME = LegacyVersion.GetUpdateField(ItemField.ITEM_FIELD_CREATE_PLAYED_TIME);
+            if (ITEM_FIELD_CREATE_PLAYED_TIME >= 0 && updateMaskArray[ITEM_FIELD_CREATE_PLAYED_TIME])
+            {
+                // Refundable purchases are timed from this; the item tooltip's refund line reads it.
+                updateData.ItemData.CreatePlayedTime = updates[ITEM_FIELD_CREATE_PLAYED_TIME].UInt32Value;
             }
             int ITEM_FIELD_SPELL_CHARGES = LegacyVersion.GetUpdateField(ItemField.ITEM_FIELD_SPELL_CHARGES);
             if (ITEM_FIELD_SPELL_CHARGES >= 0)
@@ -4278,6 +4311,17 @@ public partial class WorldClient
                 updateData.EnsureActivePlayerData().SelfResSpells = new List<uint>();
                 updateData.EnsureActivePlayerData().SelfResSpells.Add(spellId);
             }
+            // Spells the player may cast without their reagent (talents, glyphs): without the mask
+            // the client refuses the cast for lack of the reagent.
+            int PLAYER_NO_REAGENT_COST_1 = LegacyVersion.GetUpdateField(PlayerField.PLAYER_NO_REAGENT_COST_1);
+            if (PLAYER_NO_REAGENT_COST_1 >= 0)
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    if (updateMaskArray[PLAYER_NO_REAGENT_COST_1 + i])
+                        updateData.EnsureActivePlayerData().NoReagentCostMask[i] = updates[PLAYER_NO_REAGENT_COST_1 + i].UInt32Value;
+                }
+            }
             int PLAYER_FIELD_PVP_MEDALS = LegacyVersion.GetUpdateField(PlayerField.PLAYER_FIELD_PVP_MEDALS);
             if (PLAYER_FIELD_PVP_MEDALS >= 0 && updateMaskArray[PLAYER_FIELD_PVP_MEDALS])
             {
@@ -4503,7 +4547,11 @@ public partial class WorldClient
                 {
                     if (updateMaskArray[PLAYER_FIELD_DAILY_QUESTS_1 + i])
                     {
-                        GetSession().GameState.SetDailyQuestSlot((uint)i, updates[PLAYER_FIELD_DAILY_QUESTS_1 + i].UInt32Value);
+                        uint questId = updates[PLAYER_FIELD_DAILY_QUESTS_1 + i].UInt32Value;
+                        // A slot emptied at the daily reset: that quest can be taken again.
+                        if (questId == 0 && GetSession().GameState.DailyQuestsDone.TryGetValue((uint)i, out uint resetQuest))
+                            GetSession().GameState.CurrentPlayerStorage?.CompletedQuests?.OnDailyQuestReset(resetQuest);
+                        GetSession().GameState.SetDailyQuestSlot((uint)i, questId);
                         updateData.EnsureActivePlayerData().HasDailyQuestsUpdate = true;
                     }
                 }

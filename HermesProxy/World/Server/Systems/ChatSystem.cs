@@ -164,12 +164,62 @@ public static class ChatSystem
         // because Universal isn't allowed for player chat types (incl. EMOTE).
         // TC repack accepts it, which is why the fork "works" on TC but not
         // cMaNGOS. Common (7) is the language /say uses by default and is
-        // accepted everywhere.
-        const uint defaultLang = (uint)Language.Common;
+        // accepted everywhere - by the Alliance. A Horde player speaks Orcish instead.
+        uint lang = EmoteLanguage(ctx.GameState);
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
-            ctx.GetSession().WorldClient!.SendMessageChatWotLK(ChatMessageTypeWotLK.Emote, defaultLang, toBeSentTextParts[0], "", "");
+            ctx.GetSession().WorldClient!.SendMessageChatWotLK(ChatMessageTypeWotLK.Emote, lang, toBeSentTextParts[0], "", "");
         else
-            ctx.GetSession().WorldClient!.SendMessageChatVanilla(ChatMessageTypeVanilla.Emote, defaultLang, toBeSentTextParts[0], "", "");
+            ctx.GetSession().WorldClient!.SendMessageChatVanilla(ChatMessageTypeVanilla.Emote, lang, toBeSentTextParts[0], "", "");
+    }
+
+    internal static uint EmoteLanguage(GameSessionData gameState) =>
+        gameState.TryGetCachedPlayerAppearance(gameState.CurrentPlayerGuid, out Race race, out _, out _) && GameData.IsHordeRace(race)
+            ? (uint)Language.Orcish
+            : (uint)Language.Common;
+
+    // The legacy server cuts a chat message off at 255 bytes; an addon message cut short is corrupt.
+    private const int LegacyMaxAddonMessageLength = 255;
+
+    /// <summary>
+    /// The instance chat types are newer than 3.3.5a. Addons send there in a dungeon or battleground
+    /// group, which on a legacy server is the party or the battleground.
+    /// </summary>
+    internal static ChatMessageTypeModern LegacyAddonChatType(ChatMessageTypeModern type, GameSessionData gameState) =>
+        type is ChatMessageTypeModern.InstanceChat or ChatMessageTypeModern.InstanceChatLeader
+            ? (gameState.IsInBattleground() ? ChatMessageTypeModern.Battleground : ChatMessageTypeModern.Party)
+            : type;
+
+    private static bool FitsLegacyAddonMessage(string text, string prefix)
+    {
+        int length = Encoding.UTF8.GetByteCount(text);
+        if (length <= LegacyMaxAddonMessageLength)
+            return true;
+        ChatLogMessages.AddonMessageTooLong(_melLog, prefix, length);
+        return false;
+    }
+
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_BAN)]
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_UNBAN)]
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_KICK)]
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_INVITE)]
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_SET_OWNER)]
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_MODERATOR)]
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_UNMODERATOR)]
+    public static void HandleChatChannelPlayerCommand(Opcode opcode, in ChannelPlayerCommand command, in SessionContext ctx)
+    {
+        WorldPacket packet = new WorldPacket(opcode);
+        packet.WriteCString(command.ChannelName);
+        packet.WriteCString(LegacyPlayerName.StripRealmSuffixToString(command.Name));
+        ctx.SendPacketToServer(packet);
+    }
+
+    [HandlesCmsg(Opcode.CMSG_CHAT_CHANNEL_PASSWORD)]
+    public static void HandleChatChannelPassword(in ChannelPassword command, in SessionContext ctx)
+    {
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_CHAT_CHANNEL_PASSWORD);
+        packet.WriteCString(command.ChannelName);
+        packet.WriteCString(command.Password);
+        ctx.SendPacketToServer(packet);
     }
 
     /// <summary>
@@ -248,15 +298,18 @@ public static class ChatSystem
     {
         uint language = (uint)Language.Addon;
         string text = packet.Params.Prefix + '\t' + packet.Params.Text;
+        if (!FitsLegacyAddonMessage(text, packet.Params.Prefix))
+            return;
 
+        var type = LegacyAddonChatType(packet.Params.Type, ctx.GetSession().GameState);
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
         {
-            ChatMessageTypeWotLK chatMsg = packet.Params.Type.CastEnum<ChatMessageTypeWotLK>();
+            ChatMessageTypeWotLK chatMsg = type.CastEnum<ChatMessageTypeWotLK>();
             ctx.GetSession().WorldClient!.SendMessageChatWotLK(chatMsg, language, text, "", "");
         }
         else
         {
-            ChatMessageTypeVanilla chatMsg = packet.Params.Type.CastEnum<ChatMessageTypeVanilla>();
+            ChatMessageTypeVanilla chatMsg = type.CastEnum<ChatMessageTypeVanilla>();
             ctx.GetSession().WorldClient!.SendMessageChatVanilla(chatMsg, language, text, "", "");
         }
     }
@@ -269,15 +322,18 @@ public static class ChatSystem
         string channelName = packet.ChannelGuid.IsEmpty() ? "" :
             ctx.GetSession().GameState.GetChannelName((int)packet.ChannelGuid.GetCounter());
         string target = LegacyPlayerName.StripRealmSuffixToString(packet.Target);
+        if (!FitsLegacyAddonMessage(text, packet.Params.Prefix))
+            return;
 
+        var type = LegacyAddonChatType(packet.Params.Type, ctx.GetSession().GameState);
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
         {
-            ChatMessageTypeWotLK chatMsg = packet.Params.Type.CastEnum<ChatMessageTypeWotLK>();
+            ChatMessageTypeWotLK chatMsg = type.CastEnum<ChatMessageTypeWotLK>();
             ctx.GetSession().WorldClient!.SendMessageChatWotLK(chatMsg, language, text, channelName, target);
         }
         else
         {
-            ChatMessageTypeVanilla chatMsg = packet.Params.Type.CastEnum<ChatMessageTypeVanilla>();
+            ChatMessageTypeVanilla chatMsg = type.CastEnum<ChatMessageTypeVanilla>();
             ctx.GetSession().WorldClient!.SendMessageChatVanilla(chatMsg, language, text, channelName, target);
         }
     }
@@ -285,6 +341,8 @@ public static class ChatSystem
     [HandlesCmsg(Opcode.CMSG_SEND_TEXT_EMOTE)]
     public static void HandleSendTextEmote(in CTextEmote emote, in SessionContext ctx)
     {
+        // The server's answer names the target; WorldClient.HandleTextEmote turns it back into this.
+        ctx.GetSession().GameState.LastTextEmoteTarget = emote.Target;
         WorldPacket packet = new WorldPacket(Opcode.CMSG_SEND_TEXT_EMOTE);
         packet.WriteInt32(emote.EmoteID);
         packet.WriteInt32(emote.SoundIndex);

@@ -81,7 +81,7 @@ public partial class WorldClient
             instance.MapID = packet.ReadUInt32();
 
             if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
-                instance.DifficultyID = (DifficultyModern)packet.ReadUInt32();
+                instance.DifficultyID = (DifficultyModern)GameData.GetModernMapDifficulty(instance.MapID, packet.ReadUInt32()).DifficultyId;
             else
             {
                 if (ModernVersion.ExpansionVersion == 1)
@@ -135,7 +135,7 @@ public partial class WorldClient
         instance.MapID = packet.ReadUInt32();
 
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
-            instance.DifficultyID = (DifficultyModern)packet.ReadUInt32();
+            instance.DifficultyID = (DifficultyModern)GameData.GetModernMapDifficulty(instance.MapID, packet.ReadUInt32()).DifficultyId;
         else
         {
             if (ModernVersion.ExpansionVersion == 1)
@@ -154,5 +154,53 @@ public partial class WorldClient
         }
 
         SendPacketToClient(instance);
+    }
+
+    // The map's difficulty changed (entering an instance, or the group leader switching it).
+    [HandlesSmsg(Opcode.SMSG_INSTANCE_DIFFICULTY)]
+    internal void HandleInstanceDifficulty(WorldPacket packet)
+    {
+        uint difficulty = packet.ReadUInt32();
+        packet.ReadUInt32(); // IsDynamic
+        var state = GetSession().GameState;
+        state.CurrentLegacyMapDifficulty = difficulty;
+        if (state.CurrentMapId is uint mapId)
+            SendWorldServerInfo(mapId);
+    }
+
+    /// <summary>
+    /// SMSG_WORLD_SERVER_INFO with the map's modern difficulty, unless the client already has it.
+    /// </summary>
+    internal void SendWorldServerInfo(uint mapId)
+    {
+        var state = GetSession().GameState;
+        var difficulty = GameData.GetModernMapDifficulty(mapId, state.CurrentLegacyMapDifficulty);
+        if (state.SentWorldServerDifficulty == difficulty)
+            return;
+        state.SentWorldServerDifficulty = difficulty;
+
+        WorldServerInfo info = new();
+        (info.DifficultyID, info.InstanceGroupSize) = difficulty;
+        SendPacketToClient(info);
+    }
+
+    // Boss frames: 3.3.5a sends engage, disengage and priority as one opcode with a type.
+    [HandlesSmsg(Opcode.SMSG_UPDATE_INSTANCE_ENCOUNTER_UNIT)]
+    internal void HandleUpdateInstanceEncounterUnit(WorldPacket packet)
+    {
+        Opcode opcode = packet.ReadUInt32() switch
+        {
+            0 => Opcode.SMSG_INSTANCE_ENCOUNTER_ENGAGE_UNIT,
+            1 => Opcode.SMSG_INSTANCE_ENCOUNTER_DISENGAGE_UNIT,
+            2 => Opcode.SMSG_INSTANCE_ENCOUNTER_CHANGE_PRIORITY,
+            _ => Opcode.MSG_NULL_ACTION,
+        };
+        if (opcode == Opcode.MSG_NULL_ACTION || ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
+            return;
+
+        InstanceEncounterUnit unit = new(opcode);
+        unit.Unit = packet.ReadPackedGuid().To128(GetSession().GameState);
+        unit.TargetFramePriority = packet.ReadUInt8();
+        SendPacketToClient(unit);
     }
 }

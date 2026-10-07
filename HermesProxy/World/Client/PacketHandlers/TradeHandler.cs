@@ -112,13 +112,18 @@ public partial class WorldClient
             item.Item.ItemID = packet.ReadUInt32();
             packet.ReadUInt32(); // Item Display ID
             item.StackCount = packet.ReadInt32();
-            packet.ReadUInt32(); // Is Wrapped
+            bool wrapped = packet.ReadUInt32() != 0; // Is Wrapped
             item.GiftCreator = packet.ReadGuid().To128(GetSession().GameState);
             item.Unwrapped.EnchantID = packet.ReadInt32();
             if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
             {
                 for (var i = 0; i < 3; ++i)
-                    packet.ReadUInt32(); // Item Enchantment Id
+                {
+                    // Socket enchantments 2-4: the socketed gems.
+                    var gem = GameData.GemFromLegacyEnchantSlot(2 + i, packet.ReadUInt32());
+                    if (gem != null)
+                        item.Unwrapped.Gems.Add(gem);
+                }
             }
             item.Unwrapped.Creator = packet.ReadGuid().To128(GetSession().GameState);
             item.Unwrapped.Charges = packet.ReadInt32();
@@ -127,6 +132,9 @@ public partial class WorldClient
             item.Unwrapped.Lock = packet.ReadUInt32() != 0;
             item.Unwrapped.MaxDurability = packet.ReadUInt32();
             item.Unwrapped.Durability = packet.ReadUInt32();
+            // A wrapped gift shows no contents, as on a native server.
+            if (wrapped)
+                item.Unwrapped = null!;
             trade.Items.Add(item);
         }
         SendPacketToClient(trade);

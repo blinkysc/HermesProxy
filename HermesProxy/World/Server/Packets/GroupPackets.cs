@@ -1060,3 +1060,5 @@ public class RandomRoll : ServerPacket, ISpanWritable
 public readonly record struct ChangeSubGroup(WowGuid128 TargetGUID, sbyte PartyIndex, byte NewSubGroup);
 
 public readonly record struct SwapSubGroups(sbyte PartyIndex, WowGuid128 FirstTarget, WowGuid128 SecondTarget);
+
+public readonly record struct SetPartyAssignment(byte Assignment, bool Set, WowGuid128 Target);

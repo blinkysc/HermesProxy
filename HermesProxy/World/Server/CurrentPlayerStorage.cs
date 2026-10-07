@@ -49,6 +49,8 @@ public class PlayerSettings
         Session = globalSession;
     }
 
+    public bool AutoBlockGuildInvites => _internalStorage.AutoBlockGuildInvites;
+
     public void SetAutoBlockGuildInvites(bool value)
     {
         _internalStorage.AutoBlockGuildInvites = value;
@@ -131,6 +133,10 @@ public class CompletedQuestTracker
 
     public void MarkQuestAsCompleted(uint questQuestId)
     {
+        // A plain repeatable can be taken again straight away; flagging it completed hid it.
+        if (GameData.GetQuestReset(questQuestId) == QuestReset.Repeatable)
+            return;
+
         Session.AccountMetaDataMgr.MarkQuestAsCompleted(Session.GameState.CurrentPlayerInfo!.Realm.Name, Session.GameState.CurrentPlayerInfo!.Name!, questQuestId);
 
         var questBit = GameData.GetUniqueQuestBit(questQuestId);
@@ -147,14 +153,15 @@ public class CompletedQuestTracker
     /// </summary>
     public void ReplaceAll(IReadOnlyCollection<uint> questIds)
     {
-        Session.AccountMetaDataMgr.SetAllCompletedQuests(Session.GameState.CurrentPlayerInfo!.Realm.Name, Session.GameState.CurrentPlayerInfo!.Name!, questIds);
+        var kept = FilterRepeatables(questIds, Session.GameState.DailyQuestsDone.Values);
+        Session.AccountMetaDataMgr.SetAllCompletedQuests(Session.GameState.CurrentPlayerInfo!.Realm.Name, Session.GameState.CurrentPlayerInfo!.Name!, kept);
 
         var old = _cachedQuestCompleted;
         Reload();
         var changed = old.Keys.Union(_cachedQuestCompleted.Keys)
             .Where(k => old.GetValueOrDefault(k) != _cachedQuestCompleted.GetValueOrDefault(k))
             .ToList();
-        Log.Print(LogType.Server, $"[Quests] server reports {questIds.Count} completed quests ({changed.Count} QuestCompleted words changed{(_playerCreated ? "" : ", applied at player create")})");
+        Log.Print(LogType.Server, $"[Quests] server reports {questIds.Count} completed quests, {questIds.Count - kept.Count} repeatable left out ({changed.Count} QuestCompleted words changed{(_playerCreated ? "" : ", applied at player create")})");
         if (!_playerCreated || changed.Count == 0)
             return;
 
@@ -165,7 +172,41 @@ public class CompletedQuestTracker
 
         UpdateObject updatePacket = new UpdateObject(Session.GameState);
         updatePacket.ObjectUpdates.Add(updateData);
-        Session.WorldClient!.SendPacketToClient(updatePacket);
+        Session.WorldClient!.SendPlayerValuesUpdate(updatePacket);
+    }
+
+    /// <summary>
+    /// The quests to keep flagged completed: the server lists every quest ever rewarded, including
+    /// repeatables that can be taken again, which the client would then hide. A repeatable stays
+    /// only while it is one of today's dailies.
+    /// </summary>
+    public static List<uint> FilterRepeatables(IEnumerable<uint> questIds, IEnumerable<uint> doneToday)
+    {
+        var today = new HashSet<uint>(doneToday);
+        var kept = new List<uint>();
+        foreach (uint questId in questIds)
+        {
+            if (GameData.GetQuestReset(questId) == QuestReset.None || today.Contains(questId))
+                kept.Add(questId);
+        }
+        return kept;
+    }
+
+    /// <summary>A daily slot emptied at the reset: the quest can be done again.</summary>
+    public void OnDailyQuestReset(uint questId)
+    {
+        if (questId != 0 && IsTracked(questId))
+            MarkQuestAsNotCompleted(questId);
+    }
+
+    private bool IsTracked(uint questId)
+    {
+        uint? questBit = GameData.GetUniqueQuestBit(questId);
+        if (!questBit.HasValue)
+            return false;
+        int idx = (int)((questBit.Value - 1) >> 6);
+        return _cachedQuestCompleted.TryGetValue(idx, out ulong word)
+            && (word & (1UL << (int)((questBit.Value - 1) & 63))) != 0;
     }
 
     public void Reload()
@@ -201,7 +242,7 @@ public class CompletedQuestTracker
 
         UpdateObject updatePacket = new UpdateObject(Session.GameState);
         updatePacket.ObjectUpdates.Add(updateData);
-        Session.WorldClient!.SendPacketToClient(updatePacket);
+        Session.WorldClient!.SendPlayerValuesUpdate(updatePacket);
     }
 
     /// <summary>

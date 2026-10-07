@@ -630,8 +630,10 @@ public class MOTD : ServerPacket, ISpanWritable
 
     // Cap for MOTD lines - reduced from 16 to 4 based on typical usage (1 byte = empty)
     private const int MaxLines = 4;
-    // Cap per line (7 bits = max 128 chars)
-    private const int MaxLineBytes = 128;
+    // Cap per line (7 bits = max 127 bytes)
+    private const int MaxLineBytes = 127;
+    // 4 bits of line count
+    public const int MaxPacketLines = 15;
     // 4 bits(1) + per line: 7 bits(1) + text
     public int MaxSize => 1 + MaxLines * (1 + MaxLineBytes);
 
@@ -659,6 +661,44 @@ public class MOTD : ServerPacket, ISpanWritable
             writer.WriteString(line);
         }
         return writer.Position;
+    }
+
+    /// <summary>
+    /// Adds a line, wrapped at a space into as many lines as needed to keep each under the 7-bit
+    /// byte count, until the packet holds <see cref="MaxPacketLines"/>.
+    /// </summary>
+    public void AddLine(string line)
+    {
+        while (Text.Count < MaxPacketLines)
+        {
+            if (Encoding.UTF8.GetByteCount(line) <= MaxLineBytes)
+            {
+                Text.Add(line);
+                break;
+            }
+
+            // Longest prefix that fits, never splitting a surrogate pair.
+            int cut = 0;
+            int bytes = 0;
+            while (cut < line.Length)
+            {
+                int width = char.IsHighSurrogate(line[cut]) && cut + 1 < line.Length ? 2 : 1;
+                int charBytes = Encoding.UTF8.GetByteCount(line.AsSpan(cut, width));
+                if (bytes + charBytes > MaxLineBytes)
+                    break;
+                bytes += charBytes;
+                cut += width;
+            }
+
+            int space = line.LastIndexOf(' ', cut - 1, cut);
+            if (space > 0)
+                cut = space;
+
+            Text.Add(line.Substring(0, cut));
+            line = line.Substring(cut).TrimStart(' ');
+            if (line.Length == 0)
+                break;
+        }
     }
 
     public List<string> Text = new List<string>();

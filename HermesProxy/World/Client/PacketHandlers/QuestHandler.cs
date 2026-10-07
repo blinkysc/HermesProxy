@@ -131,7 +131,7 @@ public partial class WorldClient
                 rewards.FactionValue[i] = packet.ReadInt32(); // Reputation Value Id
 
             for (var i = 0; i < 5; i++)
-                packet.ReadInt32(); // Reputation Value
+                rewards.FactionOverride[i] = packet.ReadInt32(); // Reputation Value
         }
     }
 
@@ -489,11 +489,45 @@ public partial class WorldClient
         SendPacketToClient(quest);
     }
 
+    [HandlesSmsg(Opcode.SMSG_QUEST_LOG_FULL)]
+    internal void HandleQuestLogFull(WorldPacket packet)
+    {
+        SendPacketToClient(new QuestLogFull());
+    }
+
+    // A player kill counted toward a quest objective.
+    [HandlesSmsg(Opcode.SMSG_QUEST_UPDATE_ADD_PVP_CREDIT)]
+    internal void HandleQuestUpdateAddPvPCredit(WorldPacket packet)
+    {
+        QuestUpdateAddPvPCredit credit = new();
+        credit.QuestID = (int)packet.ReadUInt32();
+        credit.Count = (ushort)packet.ReadUInt32();
+        packet.ReadUInt32(); // required count
+        SendPacketToClient(credit);
+    }
+
     [HandlesSmsg(Opcode.SMSG_QUEST_GIVER_INVALID_QUEST)]
     internal void HandleQuestGiverInvalidQuest(WorldPacket packet)
     {
         QuestGiverInvalidQuest quest = new QuestGiverInvalidQuest();
-        quest.Reason = (QuestFailedReasons)packet.ReadUInt32();
+        uint reason = packet.ReadUInt32();
+        if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+        {
+            // 3.3.5a numbers these three differently from the modern enum.
+            switch (reason)
+            {
+                case 26: // INVALIDREASON_DAILY_QUESTS_REMAINING: no modern reason, say it as text
+                    SendPacketToClient(new PrintNotification { NotifyText = "You have already completed 25 daily quests today." });
+                    return;
+                case 27:
+                    reason = 24;
+                    break;
+                case 29:
+                    reason = 26;
+                    break;
+            }
+        }
+        quest.Reason = (QuestFailedReasons)reason;
         Framework.Logging.Log.Print(Framework.Logging.LogType.Trace,
             $"[QuestInvalidTrace] Reason={quest.Reason} ({(uint)quest.Reason})");
         SendPacketToClient(quest);

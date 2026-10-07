@@ -9,6 +9,7 @@ using HermesProxy.World.Server;
 using HermesProxy.World.Server.Packets;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 
 namespace HermesProxy.World.Client;
@@ -40,6 +41,8 @@ public partial class WorldClient
 
         byte count = packet.ReadUInt8();
         Log.Print(LogType.Network, $"[CharEnum] legacy count={count}");
+        var realm = GetSession().Realm;
+        var lastPlayedTimes = realm != null ? GetSession().AccountMetaDataMgr.LoadLastPlayedTimes(realm.Name) : new Dictionary<ulong, long>();
         uint virtualRealmAddress = GetSession().Realm?.Id.GetAddress() ?? 0u;
         Log.Print(LogType.Trace, $"[Trace] HandleEnumCharactersResult: realm.GetAddress()=0x{virtualRealmAddress:X8} ({virtualRealmAddress})");
         for (byte i = 0; i < count; i++)
@@ -125,15 +128,17 @@ public partial class WorldClient
                     char1.VisualItems[EquipmentSlot.Bag1 + j].DisplayEnchantId = packet.ReadUInt32();
             }
 
-            // Reset Flags2 — the legacy CustomizationFlags read above are not the same field as
-            // the modern Flags2, and stale bits there cause the 3.4.3 client to silently drop
-            // the character entry.
-            char1.Flags2 = 0;
+            // Keep only the pending customize / faction change / race change bits (0x1, 0x10000,
+            // 0x100000), which the modern Flags2 has at the same values. Any other legacy
+            // CustomizationFlags bit makes the 3.4.3 client silently drop the character entry.
+            char1.Flags2 &= 0x00110001;
             char1.Flags3 = 0;
             char1.Flags4 = 0;
             char1.ProfessionIds[0] = 0;
             char1.ProfessionIds[1] = 0;
-            char1.LastPlayedTime = (ulong) Time.UnixTime;
+            // The proxy records when each character was last played; without it the list order fell
+            // back to the server's, and every character looked played this second.
+            char1.LastPlayedTime = (ulong)(lastPlayedTimes.TryGetValue(char1.Guid.Low, out long lastPlayed) ? lastPlayed : 0);
             char1.SpecID = 0;
             char1.Unknown703 = 0;
             // Attempt 1 (per _charenum_diff_report.md): TC sends LastLoginVersion=11201
@@ -366,13 +371,9 @@ public partial class WorldClient
             SendPacketToClient(worldStates);
         }
 
-        WorldServerInfo info = new();
-        if (verify.MapID > 1)
-        {
-            info.DifficultyID = 1;
-            info.InstanceGroupSize = 5;
-        }
-        SendPacketToClient(info);
+        GetSession().GameState.CurrentLegacyMapDifficulty = 0;
+        GetSession().GameState.SentWorldServerDifficulty = null;
+        SendWorldServerInfo(verify.MapID);
 
         // SetAllTaskProgress is for pre-WotLK-Classic clients only — V3_4_3 doesn't expect it
         // and the fork explicitly skips it for ExpansionVersion >= 3.
@@ -430,7 +431,8 @@ public partial class WorldClient
             if (GetSession().GameState.CollectionFavorites == null)
                 GetSession().GameState.CollectionFavorites = GetSession().AccountMetaDataMgr.LoadCollectionFavorites();
             SendPacketToClient(AccountToyUpdate.FromSession(GetSession().GameState));
-            SendPacketToClient(new AccountHeirloomUpdate());
+            GetSession().GameState.LastSentHeirlooms = GetSession().GameState.GetCollectedHeirloomsOrdered();
+            SendPacketToClient(AccountHeirloomUpdate.FromSession(GetSession().GameState));
             SendPacketToClient(new BattlePetJournalLockAcquired());
 
             PhaseShiftChange phaseShift = new();
@@ -650,6 +652,27 @@ public partial class WorldClient
 
         UpdateObject updatePacket = new UpdateObject(GetSession().GameState);
         updatePacket.ObjectUpdates.Add(updateData);
+        SendPlayerValuesUpdate(updatePacket);
+    }
+
+    // A vehicle's or pet's combo points (e.g. the Oculus drakes): the same as the player's, on the
+    // unit the server names.
+    [HandlesSmsg(Opcode.SMSG_PET_UPDATE_COMBO_POINTS)]
+    internal void HandlePetUpdateComboPoints(WorldPacket packet)
+    {
+        var state = GetSession().GameState;
+        WowGuid128 unit = packet.ReadPackedGuid().To128(state);
+        WowGuid128 comboTarget = packet.ReadPackedGuid().To128(state);
+        byte comboPoints = packet.ReadUInt8();
+        sbyte powerSlot = ClassPowerTypes.GetPowerSlotForClass(state.GetUnitClass(unit), PowerType.ComboPoints);
+        if (powerSlot < 0)
+            return;
+
+        ObjectUpdate updateData = new ObjectUpdate(unit, UpdateTypeModern.Values, GetSession());
+        updateData.UnitData.ComboTarget = comboTarget;
+        updateData.UnitData.EnsurePower()[powerSlot] = comboPoints;
+        UpdateObject updatePacket = new UpdateObject(state);
+        updatePacket.ObjectUpdates.Add(updateData);
         SendPacketToClient(updatePacket);
     }
 
@@ -755,9 +778,52 @@ public partial class WorldClient
 
             WorldClientLogMessages.InspectTalents(
                 _melLog, _sourceFile, _netDirRecv, unspent, specsCount, activeSpec, totalTalents);
+
+            if (packet.CanRead())
+                ReadInspectEnchantments(packet, inspect);
         }
 
         SendPacketToClient(inspect);
+    }
+
+    /// <summary>
+    /// The equipped items' enchantments and gems at the end of a 3.3.5a SMSG_INSPECT_TALENT, without
+    /// which the inspect frame showed every item bare.
+    /// </summary>
+    private void ReadInspectEnchantments(WorldPacket packet, InspectResult inspect)
+    {
+        uint slotMask = packet.ReadUInt32();
+        for (byte slot = 0; slot < 32; slot++)
+        {
+            if ((slotMask & (1u << slot)) == 0)
+                continue;
+
+            uint itemId = packet.ReadUInt32();
+            ushort enchantMask = packet.ReadUInt16();
+            byte itemSlot = slot;
+            var item = inspect.DisplayInfo.Items.Find(i => i.Index == itemSlot);
+            if (item == null)
+            {
+                item = new InspectItemData { Index = slot };
+                inspect.DisplayInfo.Items.Add(item);
+            }
+            item.Item.ItemID = itemId;
+
+            for (byte enchantSlot = 0; enchantSlot < 16; enchantSlot++)
+            {
+                if ((enchantMask & (1 << enchantSlot)) == 0)
+                    continue;
+                uint enchantId = packet.ReadUInt16();
+                if (item.Enchants.Count < 15) // 4-bit count on the wire
+                    item.Enchants.Add(new InspectEnchantData(enchantId, enchantSlot));
+                var gem = GameData.GemFromLegacyEnchantSlot(enchantSlot, enchantId);
+                if (gem != null && item.Gems.Count < 3) // 2-bit count
+                    item.Gems.Add(gem);
+            }
+            item.Item.RandomPropertiesID = (uint)packet.ReadInt16();
+            item.CreatorGUID = packet.ReadPackedGuid().To128(GetSession().GameState);
+            item.Item.RandomPropertiesSeed = packet.ReadUInt32();
+        }
     }
 
     [HandlesSmsg(Opcode.MSG_INSPECT_HONOR_STATS, RemovedIn = ClientVersionBuild.V2_0_1_6180)]
@@ -905,8 +971,102 @@ public partial class WorldClient
         {
             rename.Guid = packet.ReadGuid().To128(GetSession().GameState);
             rename.Name = packet.ReadCString();
+            MoveRenamedCharacterData(rename.Guid, rename.Name);
         }
         SendPacketToClient(rename);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_CHAR_CUSTOMIZE)]
+    internal void HandleCharCustomizeResult(WorldPacket packet)
+    {
+        byte result = packet.ReadUInt8();
+        var state = GetSession().GameState;
+        if (result != 0)
+        {
+            CharCustomizeFailure failure = new();
+            failure.Result = ModernVersion.ConvertResponseCodesValue(result);
+            failure.CharGUID = state.PendingCustomizeGuid;
+            SendPacketToClient(failure);
+            return;
+        }
+
+        CharCustomizeSuccess success = new();
+        success.CharGUID = packet.ReadGuid().To128(state);
+        success.CharName = packet.ReadCString();
+        MoveRenamedCharacterData(success.CharGUID, success.CharName);
+        success.SexID = (Gender)packet.ReadUInt8();
+        byte skin = packet.ReadUInt8();
+        byte face = packet.ReadUInt8();
+        byte hairStyle = packet.ReadUInt8();
+        byte hairColor = packet.ReadUInt8();
+        byte facialHair = packet.ReadUInt8();
+        // The legacy answer has no race; a customize never changes it.
+        Race raceId = state.OwnCharacters.Find(c => c.CharacterGuid == success.CharGUID)?.RaceId ?? Race.None;
+        success.Customizations = CharacterCustomizations.ConvertLegacyCustomizationsToModern(raceId, success.SexID, skin, face, hairStyle, hairColor, facialHair);
+        SendPacketToClient(success);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_CHAR_FACTION_CHANGE_RESULT)]
+    internal void HandleCharFactionChangeResult(WorldPacket packet)
+    {
+        var state = GetSession().GameState;
+        CharFactionChangeResult change = new();
+        byte result = packet.ReadUInt8();
+        change.Result = ModernVersion.ConvertResponseCodesValue(result);
+        if (result != 0)
+        {
+            change.Guid = state.PendingCustomizeGuid;
+            SendPacketToClient(change);
+            return;
+        }
+
+        change.Guid = packet.ReadGuid().To128(state);
+        var display = new CharFactionChangeResult.CharFactionChangeDisplayInfo();
+        display.Name = packet.ReadCString();
+        MoveRenamedCharacterData(change.Guid, display.Name);
+        display.SexID = (Gender)packet.ReadUInt8();
+        byte skin = packet.ReadUInt8();
+        byte face = packet.ReadUInt8();
+        byte hairStyle = packet.ReadUInt8();
+        byte hairColor = packet.ReadUInt8();
+        byte facialHair = packet.ReadUInt8();
+        display.RaceID = (Race)packet.ReadUInt8();
+        display.Customizations = CharacterCustomizations.ConvertLegacyCustomizationsToModern(display.RaceID, display.SexID, skin, face, hairStyle, hairColor, facialHair);
+        change.Display = display;
+        SendPacketToClient(change);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_TITLE_EARNED)]
+    internal void HandleTitleEarned(WorldPacket packet)
+    {
+        uint index = packet.ReadUInt32();
+        bool earned = packet.ReadUInt32() != 0;
+        TitleEarned title = new(earned ? Opcode.SMSG_TITLE_EARNED : Opcode.SMSG_TITLE_LOST);
+        title.Index = index;
+        SendPacketToClient(title);
+    }
+
+    /// <summary>
+    /// Moves the proxy's per-character files (settings, completed quests) to the new name, which
+    /// the directory is keyed by. Without it a renamed character started over with none.
+    /// </summary>
+    private void MoveRenamedCharacterData(WowGuid128 guid, string newName)
+    {
+        var character = GetSession().GameState.OwnCharacters.Find(c => c.CharacterGuid == guid);
+        if (character?.Name == null)
+            return;
+        var realm = GetSession().Realm;
+        if (realm == null)
+            return;
+        try
+        {
+            GetSession().AccountMetaDataMgr.RenameCharacterDirectory(realm.Name, character.Name, newName, guid.Low);
+            character.Name = newName;
+        }
+        catch (IOException ex)
+        {
+            Log.Print(LogType.Warn, $"Could not move the data of renamed character {character.Name} to {newName}: {ex.Message}");
+        }
     }
 
     // Result codes are the same two values on both eras, so this is a GUID width change and

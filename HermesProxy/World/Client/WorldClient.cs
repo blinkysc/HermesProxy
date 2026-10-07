@@ -790,7 +790,7 @@ public partial class WorldClient
 
             if (LegacyVersion.Build >= ClientVersionBuild.V2_0_1_6180)
             {
-                byte expansion = packet.ReadUInt8();
+                GetSession().GameState.LegacyAccountExpansion = packet.ReadUInt8();
             }
         }
 

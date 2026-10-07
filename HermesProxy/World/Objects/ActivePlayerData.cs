@@ -199,6 +199,9 @@ public class ActivePlayerData
     public List<uint> SelfResSpells = null!;
     public bool HasDailyQuestsUpdate;
     public List<int>? Toys;
+    public List<int>? Heirlooms;
+    public List<uint>? HeirloomFlags;
+    public bool DailyQuestsCompleted => HasDailyQuestsUpdate;
 
     // These three are 25,224 of the ~29,720 bytes of arrays this class used to allocate up
     // front, and a delta that touches one scalar owner field needs none of them. They follow

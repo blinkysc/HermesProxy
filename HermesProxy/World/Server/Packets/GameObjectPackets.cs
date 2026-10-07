@@ -152,3 +152,15 @@ public class DestructibleBuildingDamage : ServerPacket
     public uint Damage;
     public int SpellID;
 }
+
+class PageTextPkt : ServerPacket
+{
+    public WowGuid128 GameObjectGUID;
+
+    public PageTextPkt() : base(Opcode.SMSG_PAGE_TEXT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(GameObjectGUID);
+    }
+}

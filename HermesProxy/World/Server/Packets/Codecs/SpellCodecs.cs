@@ -249,3 +249,41 @@ public static class PetCancelAuraCodec
         packet = new PetCancelAura(petGuid, spellId);
     }
 }
+
+public static class UpdateMissileTrajectoryCodec
+{
+    public static void Read(ref SpanPacketReader r, out UpdateMissileTrajectory packet)
+    {
+        WowGuid128 guid = r.ReadPackedGuid128();
+        r.ReadPackedGuid128(); // CastID
+        r.ReadUInt16();        // MoveMsgID
+        int spellId = r.ReadInt32();
+        float pitch = r.ReadFloat();
+        float speed = r.ReadFloat();
+        Vector3 firePos = r.ReadVector3();
+        Vector3 impactPos = r.ReadVector3();
+        packet = new UpdateMissileTrajectory(guid, spellId, pitch, speed, firePos, impactPos);
+    }
+}
+
+public static class GetMirrorImageDataCodec
+{
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Read(ref SpanPacketReader r, out GetMirrorImageData packet)
+    {
+        WowGuid128 unitGuid = r.ReadPackedGuid128();
+        int displayId = r.ReadInt32();
+        packet = new GetMirrorImageData(unitGuid, displayId);
+    }
+}
+
+public static class PetSpellAutocastCodec
+{
+    public static void Read(ref SpanPacketReader r, out PetSpellAutocast packet)
+    {
+        WowGuid128 petGuid = r.ReadPackedGuid128();
+        uint spellId = r.ReadUInt32();
+        bool enabled = r.ReadBit();
+        packet = new PetSpellAutocast(petGuid, spellId, enabled);
+    }
+}

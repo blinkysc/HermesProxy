@@ -197,3 +197,27 @@ public static class ChannelCommandCodec
     public static void Read(ref SpanPacketReader r, out ChannelCommand packet)
         => packet = new ChannelCommand(r.ReadString(r.ReadBits<uint>(7)));
 }
+
+public static class ChannelPasswordCodec
+{
+    public static void Read(ref SpanPacketReader r, out ChannelPassword packet)
+    {
+        uint channelNameLength = r.ReadBits<uint>(7);
+        uint passwordLength = r.ReadBits<uint>(7);
+        string channelName = r.ReadString(channelNameLength);
+        string password = r.ReadString(passwordLength);
+        packet = new ChannelPassword(channelName, password);
+    }
+}
+
+public static class ChannelPlayerCommandCodec
+{
+    public static void Read(ref SpanPacketReader r, out ChannelPlayerCommand packet)
+    {
+        uint channelNameLength = r.ReadBits<uint>(7);
+        uint nameLength = r.ReadBits<uint>(9);
+        string channelName = r.ReadString(channelNameLength);
+        string name = r.ReadString(nameLength);
+        packet = new ChannelPlayerCommand(channelName, name);
+    }
+}

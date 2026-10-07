@@ -103,6 +103,13 @@ public partial class WorldClient
                 history.Category = packet.ReadUInt16();
                 history.RecoveryTime = packet.ReadInt32();
                 history.CategoryRecoveryTime = packet.ReadInt32();
+                // 0x80000000: the cooldown starts when the effect ends (e.g. a potion in combat).
+                if (history.CategoryRecoveryTime == int.MinValue)
+                {
+                    history.OnHold = true;
+                    history.RecoveryTime = 0;
+                    history.CategoryRecoveryTime = 0;
+                }
 
                 histories.Entries.Add(history);
             }
@@ -1777,8 +1784,89 @@ public partial class WorldClient
 
         byte index = packet.ReadUInt8();
         byte newType = packet.ReadUInt8();
-        if (index < RuneStateData.MaxRunes)
-            runeState.RuneTypes[index] = newType;
+        if (index >= RuneStateData.MaxRunes)
+            return;
+        runeState.RuneTypes[index] = newType;
+
+        // Death Rune conversions (Blood of the North, Reaping): the 3.4.3 rune frame only
+        // redraws a rune's type from SMSG_CONVERT_RUNE, which carries the whole rune state.
+        if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
+            return;
+
+        ConvertRune convert = new() { Index = index, Rune = newType };
+        convert.Runes.Start = 0x3F;
+        for (int i = 0; i < RuneStateData.MaxRunes; i++)
+        {
+            if (runeState.Cooldowns[i] == byte.MaxValue)
+                convert.Runes.Count |= (byte)(1 << i);
+            convert.Runes.Cooldowns.Add(runeState.Cooldowns[i]);
+        }
+        SendPacketToClient(convert);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_MODIFY_COOLDOWN)]
+    internal void HandleModifyCooldown(WorldPacket packet)
+    {
+        ModifyCooldown modify = new();
+        modify.SpellID = (int)packet.ReadUInt32();
+        WowGuid128 unit = packet.ReadGuid().To128(GetSession().GameState);
+        modify.DeltaTime = packet.ReadInt32();
+        modify.IsPet = unit != GetSession().GameState.CurrentPlayerGuid;
+        SendPacketToClient(modify);
+    }
+
+    // Mirror Image and the like: the copy's appearance.
+    [HandlesSmsg(Opcode.SMSG_MIRROR_IMAGE_COMPONENTED_DATA)]
+    internal void HandleMirrorImageData(WorldPacket packet)
+    {
+        WowGuid128 unit = packet.ReadGuid().To128(GetSession().GameState);
+        int displayId = (int)packet.ReadUInt32();
+        byte raceId = packet.ReadUInt8();
+        byte gender = packet.ReadUInt8();
+        byte classId = packet.ReadUInt8();
+        byte skin = packet.ReadUInt8();
+        byte face = packet.ReadUInt8();
+        byte hairStyle = packet.ReadUInt8();
+        byte hairColor = packet.ReadUInt8();
+        byte facialHair = packet.ReadUInt8();
+        uint legacyGuildId = packet.ReadUInt32();
+        var itemDisplayIds = new List<int>(11);
+        for (int i = 0; i < 11; i++)
+            itemDisplayIds.Add((int)packet.ReadUInt32());
+
+        // Race 0: a copy of a creature, which has nothing but its display.
+        if (raceId == 0)
+        {
+            SendPacketToClient(new MirrorImageCreatureData { UnitGUID = unit, DisplayID = displayId });
+            return;
+        }
+
+        MirrorImageComponentedData data = new()
+        {
+            UnitGUID = unit,
+            DisplayID = displayId,
+            RaceID = raceId,
+            Gender = gender,
+            ClassID = classId,
+            GuildGUID = WowGuid128.CreateGuildOrEmpty(legacyGuildId),
+            ItemDisplayIDs = itemDisplayIds,
+        };
+        data.Customizations = CharacterCustomizations.ConvertLegacyCustomizationsToModern((Race)raceId, (Gender)gender, skin, face, hairStyle, hairColor, facialHair);
+        SendPacketToClient(data);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_SPELL_OR_DAMAGE_IMMUNE)]
+    internal void HandleSpellOrDamageImmune(WorldPacket packet)
+    {
+        if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
+            return;
+
+        var state = GetSession().GameState;
+        SpellOrDamageImmune immune = new();
+        immune.CasterGUID = packet.ReadGuid().To128(state);
+        immune.VictimGUID = packet.ReadGuid().To128(state);
+        immune.SpellID = (int)packet.ReadUInt32();
+        SendPacketToClient(immune);
     }
 
     [HandlesSmsg(Opcode.SMSG_ADD_RUNE_POWER)]
@@ -1980,8 +2068,20 @@ public partial class WorldClient
                 case 68: // INTERRUPT_CAST — extra spell id has no 3.4.3 execute-log slot
                     for (uint t = 0; t < targetCount; t++)
                     {
-                        entry.GenericVictimTargets.Add(packet.ReadPackedGuid().To128(session));
-                        packet.ReadUInt32();
+                        WowGuid128 victim = packet.ReadPackedGuid().To128(session);
+                        entry.GenericVictimTargets.Add(victim);
+                        int interruptedSpellId = (int)packet.ReadUInt32();
+                        // ...so the interrupted spell goes out as its own combat log line.
+                        if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261)
+                        {
+                            SendPacketToClient(new SpellInterruptLog
+                            {
+                                Caster = log.Caster,
+                                Victim = victim,
+                                InterruptedSpellID = interruptedSpellId,
+                                SpellID = log.SpellID,
+                            });
+                        }
                     }
                     break;
                 case 111: // DURABILITY_DAMAGE

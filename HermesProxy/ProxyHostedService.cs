@@ -107,6 +107,9 @@ internal sealed class ProxyHostedService : BackgroundService
         GeneratedSmsgDispatch.EnsureInitialized();
 
         GameData.LoadEverything();
+        int replayedItems = ItemTemplateCache.Replay();
+        if (replayedItems > 0)
+            Log.Print(LogType.Storage, $"Replayed {replayedItems} saved server item templates.");
 
         var net = _networkOptions.Value;
         var bindIp = NetworkUtils.ResolveOrDirectIPv64(net.ExternalAddress);

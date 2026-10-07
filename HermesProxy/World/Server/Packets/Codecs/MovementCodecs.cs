@@ -159,3 +159,14 @@ public static class RequestVehicleSwitchSeatCodec
         packet = new RequestVehicleSwitchSeat(vehicle, seatIndex);
     }
 }
+
+public static class MoveChangeVehicleSeatsCodec
+{
+    public static void Read(ref SpanPacketReader r, out MoveChangeVehicleSeats packet)
+    {
+        packet = default;
+        ClientPlayerMovementCodec.Read(ref r, out packet.Move);
+        packet.DstVehicle = r.ReadPackedGuid128();
+        packet.DstSeatIndex = r.ReadUInt8();
+    }
+}

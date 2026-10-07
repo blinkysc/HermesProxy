@@ -243,6 +243,60 @@ public partial class WorldClient
         // Trailing BONUS_ENCHANTMENT_SLOT id — the socket bonus, not a gem.
 
         gameState.SaveGemsForItem(itemGuid, gems);
+
+        // Closes the socketing frame; without it the client kept it open as if still waiting.
+        SocketGemsSuccess success = new();
+        success.ItemGuid = itemGuid;
+        SendPacketToClient(success);
+    }
+
+    // Refundable purchase (extended cost bought within two hours): what a refund would return.
+    [HandlesSmsg(Opcode.SMSG_ITEM_REFUND_INFO_RESPONSE)]
+    internal void HandleItemRefundInfoResponse(WorldPacket packet)
+    {
+        SetItemPurchaseData data = new();
+        data.ItemGUID = packet.ReadGuid().To128(GetSession().GameState);
+        data.Contents = ItemPurchaseContents.ReadLegacy(packet);
+        data.Flags = packet.ReadInt32();
+        data.PurchaseTime = packet.ReadInt32();
+        SendPacketToClient(data);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_ITEM_PURCHASE_REFUND_RESULT)]
+    internal void HandleItemPurchaseRefundResult(WorldPacket packet)
+    {
+        ItemPurchaseRefundResult refund = new();
+        refund.ItemGUID = packet.ReadGuid().To128(GetSession().GameState);
+        uint result = packet.ReadUInt32();
+        refund.Result = (byte)result;
+        if (result == 0)
+            refund.Contents = ItemPurchaseContents.ReadLegacy(packet);
+        SendPacketToClient(refund);
+    }
+
+    // Time left on a timed item (quest items that expire).
+    [HandlesSmsg(Opcode.SMSG_ITEM_TIME_UPDATE)]
+    internal void HandleItemTimeUpdate(WorldPacket packet)
+    {
+        ItemTimeUpdate update = new();
+        update.ItemGuid = packet.ReadGuid().To128(GetSession().GameState);
+        update.DurationLeft = packet.ReadUInt32();
+        SendPacketToClient(update);
+    }
+
+    // Only failures are sent; the modern client has no packet for them, so they become system text.
+    [HandlesSmsg(Opcode.SMSG_BUY_BANK_SLOT_RESULT)]
+    internal void HandleBuyBankSlotResult(WorldPacket packet)
+    {
+        string? text = packet.ReadUInt32() switch
+        {
+            0 => "You can't buy any more bank slots.",
+            1 => "You don't have enough money for that bank slot.",
+            2 => "You need to be talking to a banker.",
+            _ => null,
+        };
+        if (text != null)
+            SendPacketToClient(new ChatPkt(GetSession(), ChatMessageTypeModern.System, text));
     }
 
     [HandlesSmsg(Opcode.SMSG_ITEM_ENCHANT_TIME_UPDATE)]

@@ -172,7 +172,6 @@ public partial class WorldClient
     [HandlesSmsg(Opcode.MSG_MOVE_STOP_PITCH)]
     [HandlesSmsg(Opcode.MSG_MOVE_SET_RUN_MODE)]
     [HandlesSmsg(Opcode.MSG_MOVE_SET_WALK_MODE)]
-    [HandlesSmsg(Opcode.MSG_MOVE_TELEPORT)]
     [HandlesSmsg(Opcode.MSG_MOVE_SET_FACING)]
     [HandlesSmsg(Opcode.MSG_MOVE_SET_PITCH)]
     [HandlesSmsg(Opcode.MSG_MOVE_TOGGLE_COLLISION_CHEAT)]
@@ -225,6 +224,23 @@ public partial class WorldClient
     internal static bool IsSplineDrivenMove(uint legacyFlags, ClientVersionBuild modernBuild) =>
         modernBuild == ClientVersionBuild.V3_4_3_54261 &&
         legacyFlags.HasAnyFlag((uint)MovementFlagWotLK.SplineEnabled);
+
+    // Another unit teleported within the map. The 3.4.3 client takes a plain move as walking there.
+    [HandlesSmsg(Opcode.MSG_MOVE_TELEPORT)]
+    internal void HandleMoveTeleport(WorldPacket packet)
+    {
+        if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
+        {
+            HandleMovementMessages(packet);
+            return;
+        }
+
+        var gameState = GetSession().GameState;
+        MoveUpdateTeleport teleport = new();
+        teleport.MoverGUID = packet.ReadPackedGuid().To128(gameState);
+        LegacyMovementCodec.ReadForClient(packet, gameState, out teleport.MoveInfo);
+        SendPacketToClient(teleport);
+    }
 
     // for other players: the server relays a CMSG_MOVE_TIME_SKIPPED, guid and time only
     [HandlesSmsg(Opcode.MSG_MOVE_TIME_SKIPPED)]
@@ -438,6 +454,13 @@ public partial class WorldClient
             if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261)
             {
                 GetSession().GameState.ClientKnownGuids.Clear();
+                // Auras of the old map's units go with them; the player's own carry over.
+                var knownAuras = GetSession().GameState.KnownAuras;
+                var playerGuid = GetSession().GameState.CurrentPlayerGuid;
+                knownAuras.TryGetValue(playerGuid, out var playerAuras);
+                knownAuras.Clear();
+                if (playerAuras != null)
+                    knownAuras[playerGuid] = playerAuras;
                 GetSession().GameState.VehicleRecIds.Clear();
                 GetSession().GameState.ClientHasPlayerObject = false;
                 GetSession().GameState.ClientHasPetObject = false;
@@ -449,7 +472,7 @@ public partial class WorldClient
             }
 
             SendPacketToClient(teleport);
-            if (teleport.MapID > 1)
+            if (GameData.IsDungeonOrRaidMap(teleport.MapID))
             {
                 UpdateLastInstance instance = new();
                 instance.MapID = teleport.MapID;
@@ -469,13 +492,9 @@ public partial class WorldClient
             resume.Reason = 1;
             SendPacketToClient(resume);
 
-            WorldServerInfo info = new();
-            if (teleport.MapID > 1)
-            {
-                info.DifficultyID = 1;
-                info.InstanceGroupSize = 5;
-            }
-            SendPacketToClient(info);
+            GetSession().GameState.CurrentLegacyMapDifficulty = 0;
+            GetSession().GameState.SentWorldServerDifficulty = null;
+            SendWorldServerInfo(teleport.MapID);
         }
     }
 
@@ -676,7 +695,19 @@ public partial class WorldClient
         // Inflate hands back a pooled buffer; without the dispose the rental only comes back
         // via the finalizer.
         using WorldPacket pkt = packet.Inflate(uncompressedSize);
+        HandleBundledMoves(pkt);
+    }
 
+    // The uncompressed form of SMSG_COMPRESSED_MOVES, which the server uses for small bundles.
+    [HandlesSmsg(Opcode.SMSG_MULTIPLE_MOVES)]
+    internal void HandleMultipleMoves(WorldPacket packet)
+    {
+        packet.ReadUInt32(); // size
+        HandleBundledMoves(packet);
+    }
+
+    private void HandleBundledMoves(WorldPacket pkt)
+    {
         while (pkt.CanRead())
         {
             var size = pkt.ReadUInt8();
@@ -798,22 +829,24 @@ public partial class WorldClient
             isFlyingSpline = SplineFlagTranslation.IsServerFlight(splineFlags);
             takesSeat = splineFlags.HasAnyFlag(SplineFlagWotLK.TransportEnter);
             leavesSeat = splineFlags.HasAnyFlag(SplineFlagWotLK.TransportExit);
-            moveSpline.SplineFlags = splineFlags.CastFlags<SplineFlagWotLK, SplineFlagModern>()
+            moveSpline.SplineFlags = SplineFlagTranslation.ToModern(splineFlags)
                                      | SplineFlagTranslation.SeatMoveFlags(splineFlags);
         }
 
+        // Kept for the modern spline's own anim tier and jump blocks (MonsterMove.Write); dropped,
+        // a jump or a take-off reached the client as a flat glide.
         if (hasAnimTier)
         {
-            packet.ReadUInt8(); // Animation State
-            packet.ReadInt32(); // Async-time in ms
+            moveSpline.AnimTier = packet.ReadUInt8(); // Animation State
+            moveSpline.AnimTierStartTime = (uint)packet.ReadInt32(); // Async-time in ms
         }
 
         moveSpline.SplineTimeFull = packet.ReadUInt32();
 
         if (hasTrajectory)
         {
-            packet.ReadFloat(); // Vertical Speed
-            packet.ReadInt32(); // Async-time in ms
+            moveSpline.JumpGravity = packet.ReadFloat(); // Vertical Speed
+            moveSpline.JumpStartTime = (uint)packet.ReadInt32(); // Async-time in ms
         }
 
         moveSpline.SplineCount = packet.ReadUInt32();

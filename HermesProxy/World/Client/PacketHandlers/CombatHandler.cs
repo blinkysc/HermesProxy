@@ -92,6 +92,8 @@ public partial class WorldClient
             attack.OverDamage = -1;
 
         byte subDamageCount = packet.ReadUInt8();
+        bool hasAbsorb = hitInfo.HasAnyFlag((uint)(HitInfo.PartialAbsorb | HitInfo.FullAbsorb));
+        bool hasResist = hitInfo.HasAnyFlag((uint)(HitInfo.PartialResist | HitInfo.FullResist));
         for (int i = 0; i < subDamageCount; i++)
         {
             SubDamage subDmg = new();
@@ -104,15 +106,30 @@ public partial class WorldClient
             subDmg.FloatDamage = packet.ReadFloat();
             subDmg.IntDamage = packet.ReadInt32();
 
-            if (LegacyVersion.RemovedInVersion(ClientVersionBuild.V3_0_3_9183) ||
-                hitInfo.HasAnyFlag((uint)(HitInfo.PartialAbsorb | HitInfo.FullAbsorb)))
+            if (LegacyVersion.RemovedInVersion(ClientVersionBuild.V3_0_3_9183))
+            {
                 subDmg.Absorbed = packet.ReadInt32();
-
-            if (LegacyVersion.RemovedInVersion(ClientVersionBuild.V3_0_3_9183) ||
-                hitInfo.HasAnyFlag((uint)(HitInfo.PartialResist | HitInfo.FullResist)))
                 subDmg.Resisted = packet.ReadInt32();
+            }
 
             attack.SubDmg.Add(subDmg);
+        }
+
+        // From 3.0.3 the absorbs, then the resists, follow all the sub-damages as their own arrays
+        // (Unit::SendAttackStateUpdate), not each sub-damage. Read inline, a partially absorbed hit
+        // shifted every later field.
+        if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_3_9183))
+        {
+            if (hasAbsorb)
+            {
+                foreach (var subDmg in attack.SubDmg)
+                    subDmg.Absorbed = packet.ReadInt32();
+            }
+            if (hasResist)
+            {
+                foreach (var subDmg in attack.SubDmg)
+                    subDmg.Resisted = packet.ReadInt32();
+            }
         }
 
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_3_9183))

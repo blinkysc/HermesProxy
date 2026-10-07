@@ -206,7 +206,7 @@ public partial class WorldClient
             case GuildEventType.BankMoneyUpdate:
             {
                 GuildEventBankMoneyChanged money = new GuildEventBankMoneyChanged();
-                money.Money = (ulong)Int32.Parse(strings[0], System.Globalization.NumberStyles.HexNumber);
+                money.Money = UInt64.Parse(strings[0], System.Globalization.NumberStyles.HexNumber); // over 2^31 copper overflowed Int32
                 SendPacketToClient(money);
                 break;
             }
@@ -380,7 +380,35 @@ public partial class WorldClient
         invite.GuildName = packet.ReadCString();
         invite.GuildVirtualRealmAddress = GetSession().RealmId.GetAddress();
         invite.GuildGUID = GetSession().GetGuildGuid(invite.GuildName);
-        SendPacketToClient(invite);
+
+        // "Block guild invites" is the proxy's setting; the legacy server does not know it.
+        if (GetSession().GameState.CurrentPlayerStorage?.Settings?.AutoBlockGuildInvites == true)
+            SendPacketToServer(new WorldPacket(Opcode.CMSG_GUILD_DECLINE_INVITATION));
+        else
+            SendPacketToClient(invite);
+    }
+
+    [HandlesSmsg(Opcode.MSG_GUILD_EVENT_LOG_QUERY)]
+    internal void HandleGuildEventLog(WorldPacket packet)
+    {
+        var state = GetSession().GameState;
+        GuildEventLogQueryResults log = new();
+        byte count = packet.ReadUInt8();
+        for (int i = 0; i < count; i++)
+        {
+            GuildEventEntry entry = new();
+            entry.TransactionType = packet.ReadUInt8();
+            entry.PlayerGUID = packet.ReadGuid().To128(state);
+            // GUILD_EVENT_LOG_JOIN_GUILD (2) and LEAVE_GUILD (6) have no second player.
+            if (entry.TransactionType != 2 && entry.TransactionType != 6)
+                entry.OtherGUID = packet.ReadGuid().To128(state);
+            // PROMOTE_PLAYER (3) and DEMOTE_PLAYER (4) carry the new rank.
+            if (entry.TransactionType == 3 || entry.TransactionType == 4)
+                entry.RankID = packet.ReadUInt8();
+            entry.TransactionDate = packet.ReadUInt32();
+            log.Entries.Add(entry);
+        }
+        SendPacketToClient(log);
     }
 
     [HandlesSmsg(Opcode.MSG_TABARDVENDOR_ACTIVATE)]

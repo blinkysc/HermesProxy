@@ -106,7 +106,16 @@ public struct QuestInfoChoiceItem
 
 public class QuestObjective
 {
-    public static uint QuestObjectiveCounter = 1;
+    // Slots after the legacy template's columns (0-3 creature/GO, 4+N required items).
+    public const int SlotReputation = 12; // and 13
+    public const int SlotMoney = 14;
+    public const int SlotPlayerKills = 15;
+
+    /// <summary>
+    /// An objective id that is the same every time the quest is queried, so the client's quest
+    /// cache and the proxy agree across sessions; a running counter gave a new id each query.
+    /// </summary>
+    public static uint StableId(uint questId, int slot) => questId * 16 + (uint)slot;
 
     public uint Id;
     public uint QuestID;

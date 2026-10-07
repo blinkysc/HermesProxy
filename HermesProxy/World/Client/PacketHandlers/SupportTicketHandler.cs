@@ -21,6 +21,35 @@ public partial class WorldClient
     {
         var response = (LegacyGmTicketResponse) packet.ReadUInt32();
         bool isError = !(response is LegacyGmTicketResponse.CreateSuccess or LegacyGmTicketResponse.UpdateSuccess);
+        if (response == LegacyGmTicketResponse.AlreadyExist)
+        {
+            Session.SendHermesTextMessage("You already have an open GM ticket; the server takes one at a time, so this was not filed.", isError);
+            return;
+        }
         Session.SendHermesTextMessage($"GM Ticket Status: {response}", isError);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_COMPLAINT_RESULT)]
+    internal void HandleComplaintResult(WorldPacket packet)
+    {
+        ComplaintResult result = new();
+        result.ComplaintType = GetSession().GameState.LastComplaintSpamType; // the legacy answer has no type
+        result.Result = packet.ReadUInt8();
+        SendPacketToClient(result);
+    }
+
+    // A GM answered the ticket. The modern client's ticket UI has no place for the answer, so it
+    // goes to chat, and the ticket is closed as a native client does once it was read.
+    [HandlesSmsg(Opcode.SMSG_GMRESPONSE_RECEIVED)]
+    internal void HandleGmResponseReceived(WorldPacket packet)
+    {
+        packet.ReadUInt32(); // response id
+        packet.ReadUInt32(); // ticket id
+        packet.ReadCString(); // the ticket text
+        var answer = new System.Text.StringBuilder();
+        for (int i = 0; i < 4 && packet.CanRead(); i++)
+            answer.Append(packet.ReadCString());
+        Session.SendHermesTextMessage($"A GM answered your ticket: {answer}");
+        SendPacketToServer(new WorldPacket(Opcode.CMSG_GM_TICKET_RESPONSE_RESOLVE));
     }
 }

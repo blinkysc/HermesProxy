@@ -278,7 +278,7 @@ public partial class WorldClient
             slotUpdate.EnsureActivePlayerData().NumStableSlots = numStableSlots;
             UpdateObject slotPacket = new UpdateObject(GetSession().GameState);
             slotPacket.ObjectUpdates.Add(slotUpdate);
-            SendPacketToClient(slotPacket);
+            SendPlayerValuesUpdate(slotPacket);
         }
         List<PetStableInfo> stabledPets = new();
         for (byte i = 0; i < count; i++)
@@ -510,5 +510,33 @@ public partial class WorldClient
         };
 
         return (v343Slot << 23) | (spellId & V343ActionButtonSpellMask);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_PET_NAME_INVALID)]
+    internal void HandlePetNameInvalid(WorldPacket packet)
+    {
+        if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
+            return;
+
+        PetNameInvalid invalid = new();
+        invalid.Result = (byte)packet.ReadUInt32();
+        invalid.NewName = packet.ReadCString();
+        if (packet.CanRead() && packet.ReadUInt8() != 0)
+        {
+            invalid.DeclinedNames = new string[5];
+            for (int i = 0; i < 5; i++)
+                invalid.DeclinedNames[i] = packet.ReadCString();
+        }
+        invalid.PetGUID = GetSession().GameState.CurrentPetGuid;
+        SendPacketToClient(invalid);
+    }
+
+    // "Your pet can't do that" and the like.
+    [HandlesSmsg(Opcode.SMSG_PET_ACTION_FEEDBACK)]
+    internal void HandlePetActionFeedback(WorldPacket packet)
+    {
+        if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
+            return;
+        SendPacketToClient(new PetActionFeedbackPkt { Response = packet.ReadUInt8() });
     }
 }

@@ -133,7 +133,9 @@ public static class ArenaSystem
             string name = member.Name;
             if (string.IsNullOrEmpty(name))
                 name = ctx.GetSession().GameState.GetPlayerName(member.GUID);
-            if (string.IsNullOrEmpty(name))
+            // Once per team and player: the server's "already in a team" answer to a repeat is
+            // then recognised as ours (WorldClient.HandleArenaTeamCommandResult) and dropped.
+            if (string.IsNullOrEmpty(name) || !ctx.GetSession().GameState.InjectedArenaInvites.Add($"{teamId}:{name}"))
                 continue;
 
             WorldPacket invite = new WorldPacket(Opcode.CMSG_ARENA_TEAM_INVITE);

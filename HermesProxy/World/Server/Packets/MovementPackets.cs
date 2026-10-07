@@ -152,7 +152,9 @@ public class MonsterMove : ServerPacket, ISpanWritable
         _worldPacket.WriteBits(PackedDeltaCount, 16);
         _worldPacket.WriteBit(false); // SplineFilter.HasValue
         _worldPacket.WriteBit(false); // SpellEffectExtraData.HasValue
-        _worldPacket.WriteBit(false); // JumpExtraData.HasValue
+        _worldPacket.WriteBit(MoveSpline.JumpGravity.HasValue); // JumpExtraData.HasValue
+        if (HasAnimTierTransitionBit)
+            _worldPacket.WriteBit(MoveSpline.AnimTier.HasValue); // AnimTierTransition.HasValue
         _worldPacket.FlushBits();
 
         //if (SplineFilter.HasValue)
@@ -184,6 +186,21 @@ public class MonsterMove : ServerPacket, ISpanWritable
         for (int i = 0; i < PackedDeltaCount; i++)
             _worldPacket.WritePackXYZ(PackedDelta(i));
 
+        if (MoveSpline.JumpGravity.HasValue)
+        {
+            _worldPacket.WriteFloat(MoveSpline.JumpGravity.Value); // JumpGravity
+            _worldPacket.WriteUInt32(MoveSpline.JumpStartTime);   // StartTime
+            _worldPacket.WriteUInt32(0);                           // Duration
+        }
+
+        if (HasAnimTierTransitionBit && MoveSpline.AnimTier.HasValue)
+        {
+            _worldPacket.WriteInt32(0);                                // TierTransitionID
+            _worldPacket.WriteUInt32(MoveSpline.AnimTierStartTime);    // StartTime
+            _worldPacket.WriteUInt32(0);                               // EndTime
+            _worldPacket.WriteUInt8(MoveSpline.AnimTier.Value);        // AnimTier
+        }
+
         /*
         if (SpellEffectExtraData.HasValue)
             SpellEffectExtraData.Value.Write(data);
@@ -205,7 +222,12 @@ public class MonsterMove : ServerPacket, ISpanWritable
 
     // Fixed: GUID(18) + StartPos(12) + SplineId(4) + Dest(12) + flags/times(36) + bits(6) = 88
     // SplineType FacingTarget (worst case, V2_5+): float(4) + GUID(18) = 22
-    private const int FixedSize = 88 + 22; // 110 bytes
+    // Jump block: float + 2 uint (12). Anim tier block: int + 2 uint + byte (13).
+    private const int FixedSize = 88 + 22 + 12 + 13; // 135 bytes
+
+    // The 3.4.3 MovementSpline has an AnimTierTransition after JumpExtraData; the older modern
+    // builds do not.
+    private static bool HasAnimTierTransitionBit => ModernVersion.Build == HermesProxy.Enums.ClientVersionBuild.V3_4_3_54261;
 
     // Sized from this packet's own spline: points write as Vector3 (12 B), packed deltas as
     // PackXYZ (4 B) -- see WriteToSpan. Both counts are known from the spline before
@@ -244,7 +266,9 @@ public class MonsterMove : ServerPacket, ISpanWritable
         writer.WriteBits((uint)PackedDeltaCount, 16);
         writer.WriteBit(false); // SplineFilter.HasValue
         writer.WriteBit(false); // SpellEffectExtraData.HasValue
-        writer.WriteBit(false); // JumpExtraData.HasValue
+        writer.WriteBit(MoveSpline.JumpGravity.HasValue); // JumpExtraData.HasValue
+        if (HasAnimTierTransitionBit)
+            writer.WriteBit(MoveSpline.AnimTier.HasValue); // AnimTierTransition.HasValue
         writer.FlushBits();
 
         switch (MoveSpline.SplineType)
@@ -267,6 +291,21 @@ public class MonsterMove : ServerPacket, ISpanWritable
 
         for (int i = 0; i < PackedDeltaCount; i++)
             writer.WritePackXYZ(PackedDelta(i));
+
+        if (MoveSpline.JumpGravity.HasValue)
+        {
+            writer.WriteFloat(MoveSpline.JumpGravity.Value);
+            writer.WriteUInt32(MoveSpline.JumpStartTime);
+            writer.WriteUInt32(0);
+        }
+
+        if (HasAnimTierTransitionBit && MoveSpline.AnimTier.HasValue)
+        {
+            writer.WriteInt32(0);
+            writer.WriteUInt32(MoveSpline.AnimTierStartTime);
+            writer.WriteUInt32(0);
+            writer.WriteUInt8(MoveSpline.AnimTier.Value);
+        }
 
         // Opt-in wire trace — see Write() above.
         if (MovementTrace.Enabled)
@@ -924,3 +963,29 @@ public readonly record struct InitActiveMoverComplete(uint Ticks);
 
 public readonly record struct MoveSplineDone(WowGuid128 Guid, MovementInfo MoveInfo, int SplineID);
 public readonly record struct MoveTimeSkipped(WowGuid128 MoverGUID, uint TimeSkipped);
+
+public struct MoveChangeVehicleSeats
+{
+    public ClientPlayerMovement Move;
+    public WowGuid128 DstVehicle;
+    public byte DstSeatIndex;
+}
+
+public class MoveUpdateTeleport : ServerPacket
+{
+    public WowGuid128 MoverGUID;
+    public MovementInfo MoveInfo;
+
+    public MoveUpdateTeleport() : base(Opcode.SMSG_MOVE_UPDATE_TELEPORT, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        ModernMovementCodec.Write(_worldPacket, MoverGUID, in MoveInfo);
+        _worldPacket.WriteUInt32(0u);
+        for (int i = 0; i < 9; i++)
+        {
+            _worldPacket.WriteBit(false);
+        }
+        _worldPacket.FlushBits();
+    }
+}

@@ -25,7 +25,7 @@ public partial class WorldClient
         MOTD motd = new MOTD();
         uint count = packet.ReadUInt32();
         for (uint i = 0; i < count; i++)
-            motd.Text.Add(packet.ReadCString());
+            motd.AddLine(packet.ReadCString()); // wrapped: a server line can be longer than the 127 bytes a modern line holds
         SendPacketToClient(motd);
 
         // These packets don't exist in old clients (for vanilla servers we send them after account data times along with others).

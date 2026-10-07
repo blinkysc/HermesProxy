@@ -794,3 +794,23 @@ class PlayerSkinned : ServerPacket, ISpanWritable
 
     public bool FreeRepop;
 }
+
+public readonly record struct ReportPvPPlayerAFK(WowGuid128 Offender);
+
+public class ReportPvPPlayerAFKResult : ServerPacket
+{
+    public WowGuid128 Offender;
+    public byte Result;
+    public byte NumBlackMarksOnOffender;
+    public byte NumPlayersIHaveReported;
+
+    public ReportPvPPlayerAFKResult() : base(Opcode.SMSG_REPORT_PVP_PLAYER_AFK_RESULT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(Offender);
+        _worldPacket.WriteUInt8(Result);
+        _worldPacket.WriteUInt8(NumBlackMarksOnOffender);
+        _worldPacket.WriteUInt8(NumPlayersIHaveReported);
+    }
+}

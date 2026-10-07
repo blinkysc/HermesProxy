@@ -25,4 +25,9 @@ public sealed class ServerSideMovement
     public WowGuid128 TransportGuid;
     public sbyte TransportSeat;
     public List<Vector3> SplinePoints = new();
+    // Jump (legacy Trajectory) and anim tier blocks, written by MonsterMove when set.
+    public float? JumpGravity;
+    public uint JumpStartTime;
+    public byte? AnimTier;
+    public uint AnimTierStartTime;
 }

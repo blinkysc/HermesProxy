@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Framework;
 using Framework.Logging;
+using HermesProxy.Enums;
 
 namespace HermesProxy.World.Server;
 
@@ -18,6 +19,8 @@ public class AccountMetaDataManager
     private const string SETTINGS_FILE = "settings.json";
     private const string CHAR_LIST_ORDER_FILE = "char_list_order.txt";
     private const string COLLECTION_FAVORITES_FILE = "collection_favorites.json";
+    private const string CHARACTER_OWNER_FILE = "character_guid.txt";
+    private const string LAST_PLAYED_FILE = "last_played.txt";
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
     private readonly string _accountName;
@@ -34,12 +37,72 @@ public class AccountMetaDataManager
 
     private string GetAccountCharacterMetaDataDirectory(string realm, string characterName)
     {
-        string path = Path.GetFullPath(Path.Combine("AccountData", _accountName, realm, characterName));
+        string path = CharacterDirectoryPath(realm, characterName);
 
         if (!Directory.Exists(path))
             Directory.CreateDirectory(path);
 
         return path;
+    }
+
+    private string CharacterDirectoryPath(string realm, string characterName)
+        => Path.GetFullPath(Path.Combine("AccountData", _accountName, realm, characterName));
+
+    private static ulong? ReadCharacterOwner(string dir)
+    {
+        string path = Path.Combine(dir, CHARACTER_OWNER_FILE);
+        if (!File.Exists(path) || !ulong.TryParse(File.ReadAllText(path).Trim(), out ulong guidLow))
+            return null;
+        return guidLow;
+    }
+
+    /// <summary>
+    /// Makes the character's folder its own. A folder is keyed by name, so one left by a deleted
+    /// character of the same name would hand its completed quests and settings to the new one; it
+    /// is moved aside to <c>name~guid</c> instead.
+    /// </summary>
+    public void ClaimCharacterDirectory(string realm, string characterName, ulong guidLow)
+    {
+        string dir = CharacterDirectoryPath(realm, characterName);
+        if (Directory.Exists(dir))
+        {
+            ulong? owner = ReadCharacterOwner(dir);
+            if (owner == guidLow)
+                return;
+            if (owner.HasValue)
+            {
+                string aside = $"{dir}~{owner}";
+                if (Directory.Exists(aside))
+                    aside += $"-{Time.UnixTime}";
+                Directory.Move(dir, aside);
+                Log.Print(LogType.Server, $"Character folder '{characterName}' belonged to another character ({owner}); moved it to '{Path.GetFileName(aside)}'");
+            }
+        }
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, CHARACTER_OWNER_FILE), guidLow.ToString());
+    }
+
+    /// <summary>Moves a renamed character's folder to its new name.</summary>
+    public void RenameCharacterDirectory(string realm, string oldName, string newName, ulong guidLow)
+    {
+        if (string.Equals(oldName, newName, StringComparison.Ordinal))
+            return;
+        string from = CharacterDirectoryPath(realm, oldName);
+        if (!Directory.Exists(from))
+            return;
+        if (ReadCharacterOwner(from) is ulong owner && owner != guidLow)
+            return;
+
+        string to = CharacterDirectoryPath(realm, newName);
+        if (Directory.Exists(to))
+        {
+            // Moves a folder another character left under the new name aside, then clears the
+            // now-empty one it claimed.
+            ClaimCharacterDirectory(realm, newName, guidLow);
+            Directory.Delete(to, recursive: true);
+        }
+        Directory.Move(from, to);
+        File.WriteAllText(Path.Combine(to, CHARACTER_OWNER_FILE), guidLow.ToString());
     }
     
     public AccountMetaDataManager(string accountName)
@@ -117,6 +180,29 @@ public class AccountMetaDataManager
         return path;
     }
 
+    /// <summary>When each character of the realm was last played, by GUID low, in unix seconds.</summary>
+    public Dictionary<ulong, long> LoadLastPlayedTimes(string realmName)
+    {
+        var times = new Dictionary<ulong, long>();
+        var path = Path.Combine(GetAccountRealmDirectory(realmName), LAST_PLAYED_FILE);
+        if (!File.Exists(path))
+            return times;
+        foreach (string line in File.ReadAllLines(path))
+        {
+            var parts = line.Split(',');
+            if (parts.Length == 2 && ulong.TryParse(parts[0], out ulong guidLow) && long.TryParse(parts[1], out long when))
+                times[guidLow] = when;
+        }
+        return times;
+    }
+
+    public void SaveLastPlayedTime(string realmName, ulong guidLow, long unixTime)
+    {
+        var times = LoadLastPlayedTimes(realmName);
+        times[guidLow] = unixTime;
+        File.WriteAllLines(Path.Combine(GetAccountRealmDirectory(realmName), LAST_PLAYED_FILE), times.Select(t => $"{t.Key},{t.Value}"));
+    }
+
     public List<CharacterListSlot> LoadCharacterListOrder(string realmName)
     {
         var path = Path.Combine(GetAccountRealmDirectory(realmName), CHAR_LIST_ORDER_FILE);
@@ -187,6 +273,11 @@ public class AccountMetaDataManager
         var dir = GetAccountCharacterMetaDataDirectory(realmName, charName);
         var path = Path.Combine(dir, COMPLETED_QUESTS_FILE);
 
+        // Once per quest: the server's full list (SetAllCompletedQuests) may already have it.
+        string needle = questId.ToString();
+        if (File.Exists(path) && File.ReadLines(path).Any(l => l.Split(',')[0].Trim('\ufeff') == needle))
+            return;
+
         var when = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         File.AppendAllLines(path, new[]{$"{questId},{when}"}, Encoding.UTF8);
     }
@@ -195,6 +286,9 @@ public class AccountMetaDataManager
     {
         var dir = GetAccountCharacterMetaDataDirectory(realmName, charName);
         var path = Path.Combine(dir, COMPLETED_QUESTS_FILE);
+
+        if (!File.Exists(path))
+            return;
 
         string needle = questId.ToString();
         List<string> lines = File.ReadAllLines(path).ToList();
@@ -242,6 +336,7 @@ public class AccountMetaDataManager
         loaded.FavoriteMountSpells ??= [];
         loaded.LearnedToys ??= [];
         loaded.FavoriteToys ??= [];
+        loaded.CollectedHeirlooms ??= [];
         return loaded;
     }
 
@@ -258,6 +353,7 @@ public sealed class CollectionFavorites
     public HashSet<uint> FavoriteMountSpells { get; set; } = [];
     public HashSet<uint> LearnedToys { get; set; } = [];
     public HashSet<uint> FavoriteToys { get; set; } = [];
+    public HashSet<uint> CollectedHeirlooms { get; set; } = [];
 }
 
 public class AccountData
@@ -278,6 +374,41 @@ public class AccountDataManager
     {
         _accountName = accountName;
         _realmName = realmName.Trim();
+    }
+
+    // A 3.x server keeps account data types 0-7 (NUM_ACCOUNT_DATA_TYPES). Only 0-5 are synced:
+    // the layout (6) and chat (7) formats changed too much to share with a 3.3.5a client.
+    public const int ServerTypeCount = 8;
+    public const int ServerSyncedTypeCount = 6;
+    // PER_CHARACTER_CACHE_MASK: types 1, 3, 5, 6 and 7.
+    public const uint ServerPerCharacterMask = 0xEA;
+
+    /// <summary>The server's timestamp per type, from SMSG_ACCOUNT_DATA_TIMES.</summary>
+    public readonly long[] ServerTimes = new long[ServerTypeCount];
+
+    // The client request a server copy is being fetched for, so the answer goes back to it.
+    private readonly WowGuid128?[] _awaitingServer = new WowGuid128?[ServerTypeCount];
+
+    public static bool IsSyncedWithServer(uint type) =>
+        type < ServerSyncedTypeCount && LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056);
+
+    /// <summary>The newer of the local and the server copy's timestamps.</summary>
+    public long GetEffectiveTime(uint type)
+    {
+        long local = Data?[type]?.Timestamp ?? 0;
+        return IsSyncedWithServer(type) ? Math.Max(local, ServerTimes[type]) : local;
+    }
+
+    public bool ServerIsNewer(uint type) =>
+        IsSyncedWithServer(type) && ServerTimes[type] > (Data?[type]?.Timestamp ?? 0);
+
+    public void AwaitServerData(uint type, WowGuid128 requestGuid) => _awaitingServer[type] = requestGuid;
+
+    public WowGuid128? TakeAwaitingServer(uint type)
+    {
+        var guid = _awaitingServer[type];
+        _awaitingServer[type] = null;
+        return guid;
     }
 
     public static bool IsGlobalDataType(uint type)

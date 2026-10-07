@@ -843,3 +843,105 @@ internal static class ItemPacketHelpers
         return true;
     }
 }
+
+public readonly record struct GetItemPurchaseData(WowGuid128 ItemGUID);
+
+/// <summary>What a refundable purchase cost: money, up to five items and five currencies.</summary>
+public sealed class ItemPurchaseContents
+{
+    // Legacy honor and arena points are modern currencies.
+    private const int HonorPointsCurrency = 1901;
+    private const int ArenaPointsCurrency = 1900;
+
+    public ulong Money;
+    public readonly (int ItemID, int ItemCount)[] Items = new (int, int)[5];
+    public readonly (int CurrencyID, int CurrencyCount)[] Currencies = new (int, int)[5];
+
+    public static ItemPurchaseContents ReadLegacy(WorldPacket packet)
+    {
+        ItemPurchaseContents contents = new();
+        contents.Money = packet.ReadUInt32();
+        uint honorPoints = packet.ReadUInt32();
+        uint arenaPoints = packet.ReadUInt32();
+        for (int i = 0; i < 5; i++)
+        {
+            int itemId = (int)packet.ReadUInt32();
+            int itemCount = (int)packet.ReadUInt32();
+            contents.Items[i] = (itemId, itemCount);
+        }
+
+        int currency = 0;
+        if (honorPoints != 0)
+            contents.Currencies[currency++] = (HonorPointsCurrency, (int)honorPoints);
+        if (arenaPoints != 0)
+            contents.Currencies[currency++] = (ArenaPointsCurrency, (int)arenaPoints);
+        return contents;
+    }
+
+    public void Write(WorldPacket data)
+    {
+        data.WriteUInt64(Money);
+        foreach (var (itemId, itemCount) in Items)
+        {
+            data.WriteInt32(itemId);
+            data.WriteInt32(itemCount);
+        }
+        foreach (var (currencyId, currencyCount) in Currencies)
+        {
+            data.WriteInt32(currencyId);
+            data.WriteInt32(currencyCount);
+        }
+    }
+}
+
+public readonly record struct ItemPurchaseRefund(WowGuid128 ItemGUID);
+
+class ItemPurchaseRefundResult : ServerPacket
+{
+    public WowGuid128 ItemGUID;
+    public byte Result;
+    public ItemPurchaseContents? Contents;
+
+    public ItemPurchaseRefundResult() : base(Opcode.SMSG_ITEM_PURCHASE_REFUND_RESULT, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(ItemGUID);
+        _worldPacket.WriteUInt8(Result);
+        _worldPacket.WriteBit(Contents != null);
+        _worldPacket.FlushBits();
+        Contents?.Write(_worldPacket);
+    }
+}
+
+class ItemTimeUpdate : ServerPacket
+{
+    public WowGuid128 ItemGuid;
+    public uint DurationLeft;
+
+    public ItemTimeUpdate() : base(Opcode.SMSG_ITEM_TIME_UPDATE, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(ItemGuid);
+        _worldPacket.WriteUInt32(DurationLeft);
+    }
+}
+
+class SetItemPurchaseData : ServerPacket
+{
+    public WowGuid128 ItemGUID;
+    public ItemPurchaseContents Contents = new ItemPurchaseContents();
+    public int Flags;
+    public int PurchaseTime;
+
+    public SetItemPurchaseData() : base(Opcode.SMSG_SET_ITEM_PURCHASE_DATA, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(ItemGUID);
+        Contents.Write(_worldPacket);
+        _worldPacket.WriteInt32(Flags);
+        _worldPacket.WriteInt32(PurchaseTime);
+    }
+}

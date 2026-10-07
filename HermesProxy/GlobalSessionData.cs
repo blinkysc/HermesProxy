@@ -142,6 +142,12 @@ public sealed class GameSessionData
     // re-request the stable list to learn the new count (#224).
     public WowGuid128? LastStableMaster;
     public uint? CurrentMapId;
+    // Expansion the legacy account is flagged for, as SMSG_AUTH_RESPONSE reports it.
+    public byte LegacyAccountExpansion = (byte)(LegacyVersion.ExpansionVersion > 0 ? LegacyVersion.ExpansionVersion - 1 : 0);
+    public long LastLfgJoinStatusRequest;
+    public uint CurrentLegacyMapDifficulty;
+    // Difficulty the last SMSG_WORLD_SERVER_INFO carried, so a repeat is only sent on a change.
+    public (uint DifficultyId, uint? GroupSize)? SentWorldServerDifficulty;
     public uint CurrentZoneId;
     public uint CurrentTaxiNode;
     public List<byte> UsableTaxiNodes = [];
@@ -172,6 +178,7 @@ public sealed class GameSessionData
     public Dictionary<WowGuid128, byte> GroupAssignedRoles = new();
     public bool WeWantToLeaveGroup; // Only send kick message when we dont initiated the group-leave
     public List<OwnCharacterInfo> OwnCharacters = [];
+    public WowGuid128 PendingCustomizeGuid;
 
     // V3_4_3 SMSG_CREATE_CHAR.Guid synthesis. Legacy 3.3.5 SMSG_CHAR_CREATE is a
     // 1-byte response (code only) — but the V3_4_3 client uses the GUID in the
@@ -425,6 +432,7 @@ public sealed class GameSessionData
     public WowGuid64 SummonedCompanionLegacyGuid;
     public CollectionFavorites? CollectionFavorites;
     public uint[] LastSentUsableToys = [];
+    public int[] LastSentHeirlooms = [];
     // V3_4_3 DK rune snapshot. Null for non-DK or non-V3_4_3 sessions; allocated by
     // CharacterHandler.HandlePlayerLogin when the chosen char is a DK and the modern
     // client is V3_4_3_54261. Read by V3_4_3 ObjectUpdateBuilder (CREATE path) and
@@ -439,6 +447,10 @@ public sealed class GameSessionData
     public Dictionary<WowGuid128, uint> PlayerGuildIds = [];
     public readonly Lock ObjectCacheLock = new();
     public Dictionary<WowGuid128, Dictionary<int, UpdateField>> ObjectCacheLegacy = [];
+    public WowGuid128 LastTextEmoteTarget;
+    public uint LastComplaintSpamType;
+    // "team:player" arena invites the proxy sent on the client's behalf.
+    public HashSet<string> InjectedArenaInvites = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<WowGuid128, UpdateFieldsArray> ObjectCacheModern = [];
     public Dictionary<WowGuid128, ObjectType> OriginalObjectTypes = [];
     public Dictionary<WowGuid128, uint[]> ItemGems = [];
@@ -641,6 +653,23 @@ public sealed class GameSessionData
     // received and the minimap eye stays up forever. Watching this flag go true -> false is the
     // only signal the proxy has that the association is over.
     public bool LastGroupWasLfg;
+
+    /// <summary>A creature or vehicle in view whose template name is exactly <paramref name="name"/>.</summary>
+    public WowGuid128 FindVisibleCreatureByName(string name)
+    {
+        lock (ObjectCacheLock)
+        {
+            foreach (var guid in ObjectCacheLegacy.Keys)
+            {
+                if (guid.GetHighType() is not (HighGuidType.Creature or HighGuidType.Vehicle))
+                    continue;
+                var template = GameData.GetCreatureTemplate(guid.GetEntry());
+                if (template != null && string.Equals(template.Name[0], name, StringComparison.Ordinal))
+                    return guid;
+            }
+        }
+        return default;
+    }
 
     // TC creates exactly one RideTicket per queue in LFGMgr::JoinLfg (Id = GetQueueId,
     // Time = GameTime::GetGameTime()), stores it per player and reuses it for every subsequent
@@ -1210,7 +1239,7 @@ public sealed class GameSessionData
     {
         var usable = new List<uint>();
         if (!CurrentPlayerGuid.IsEmpty() && ObjectCacheLock != null)
-            CollectInventoryToyIds(usable);
+            CollectInventoryItemIds(usable, GameData.IsToyItem);
         var learned = CollectionFavorites?.LearnedToys;
         if (learned != null)
         {
@@ -1229,14 +1258,42 @@ public sealed class GameSessionData
         usable.Sort();
         return usable.ToArray();
     }
-    void CollectInventoryToyIds(List<uint> dest)
+    /// <summary>
+    /// Adds the heirlooms the player carries to the collected set. True when one was new.
+    /// </summary>
+    public bool CollectCarriedHeirlooms()
+    {
+        var collected = CollectionFavorites?.CollectedHeirlooms;
+        if (collected == null || CurrentPlayerGuid.IsEmpty() || ObjectCacheLock == null)
+            return false;
+
+        var carried = new List<uint>();
+        CollectInventoryItemIds(carried, id => GameData.Heirlooms.Contains((int)id));
+        bool added = false;
+        foreach (uint id in carried)
+            added |= collected.Add(id);
+        return added;
+    }
+    public int[] GetCollectedHeirloomsOrdered()
+    {
+        var collected = CollectionFavorites?.CollectedHeirlooms;
+        if (collected == null || collected.Count == 0)
+            return [];
+        var ordered = new int[collected.Count];
+        int i = 0;
+        foreach (uint id in collected)
+            ordered[i++] = (int)id;
+        Array.Sort(ordered);
+        return ordered;
+    }
+    void CollectInventoryItemIds(List<uint> dest, Predicate<uint> match)
     {
         void Consider(WowGuid64 guid64)
         {
             if (guid64 == WowGuid64.Empty)
                 return;
             uint itemId = GetItemId(guid64.To128(this));
-            if (itemId == 0 || !GameData.IsToyItem(itemId) || dest.Contains(itemId))
+            if (itemId == 0 || !match(itemId) || dest.Contains(itemId))
                 return;
             dest.Add(itemId);
         }
@@ -2074,6 +2131,10 @@ public class GlobalSessionData
     public AccountDataManager AccountDataMgr = null!;
 
     public WorldSocket RealmSocket = null!;
+    public uint LegacyCacheVersion;
+    // Legacy server clock minus ours, in seconds, once SMSG_QUERY_TIME_RESPONSE has measured it.
+    public long? LegacyServerTimeOffset;
+    public WorldSocket? ServerTimeOffsetRequester;
     public WorldSocket InstanceSocket = null!;
     public AuthClient AuthClient = null!;
     public WorldClient? WorldClient;

@@ -13,6 +13,20 @@ namespace HermesProxy.World.Client;
 public partial class WorldClient
 {
     // Handlers for SMSG opcodes coming the legacy world server
+    // Who may loot a corpse: the master looter and the round-robin winner.
+    [HandlesSmsg(Opcode.SMSG_LOOT_LIST)]
+    internal void HandleLootList(WorldPacket packet)
+    {
+        var state = GetSession().GameState;
+        WowGuid64 owner = packet.ReadGuid();
+        LootList list = new();
+        list.Owner = owner.To128(state);
+        list.LootObj = owner.ToLootGuid();
+        list.Master = packet.ReadPackedGuid().To128(state);
+        list.RoundRobinWinner = packet.ReadPackedGuid().To128(state);
+        SendPacketToClient(list);
+    }
+
     [HandlesSmsg(Opcode.SMSG_LOOT_RESPONSE)]
     internal void HandleLootResponse(WorldPacket packet)
     {

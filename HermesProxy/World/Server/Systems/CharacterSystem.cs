@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Framework.Constants;
 using Framework.Logging;
@@ -203,6 +204,15 @@ public static class CharacterSystem
         }
 
         ctx.GetSession().AccountMetaDataMgr.SaveLastSelectedCharacter(realm.Name, selectedChar.Name!, playerLogin.Guid.Low, Time.UnixTime);
+        try
+        {
+            ctx.GetSession().AccountMetaDataMgr.SaveLastPlayedTime(realm.Name, playerLogin.Guid.Low, Time.UnixTime);
+            ctx.GetSession().AccountMetaDataMgr.ClaimCharacterDirectory(realm.Name, selectedChar.Name!, playerLogin.Guid.Low);
+        }
+        catch (IOException ex)
+        {
+            Log.Print(LogType.Warn, $"Could not update the saved data of {selectedChar.Name}: {ex.Message}");
+        }
         ctx.GetSession().GameState.CollectionFavorites ??= ctx.GetSession().AccountMetaDataMgr.LoadCollectionFavorites();
 
         if (ctx.GetSession().AuthClient != null)
@@ -243,6 +253,11 @@ public static class CharacterSystem
             $"guid={playerLogin.Guid} realm='{realm.Name}': state published, opening instance connection");
         ctx.Socket!.SendConnectToInstance(ConnectToSerial.WorldAttempt1);
         ctx.ToClient.BeginInstanceConnect();
+
+        // A 3.x server sends the per-character account data times only after this; they decide
+        // whether the server's keybindings and macros are newer than the proxy's.
+        if (AccountDataManager.IsSyncedWithServer(0))
+            ctx.SendPacketToServer(new WorldPacket(Opcode.CMSG_READY_FOR_ACCOUNT_DATA_TIMES));
 
         WorldPacket packet = new WorldPacket(Opcode.CMSG_PLAYER_LOGIN);
         packet.WriteGuid(playerLogin.Guid.To64());
@@ -417,6 +432,50 @@ public static class CharacterSystem
         WorldPacket packet = new WorldPacket(opcode);
         packet.WriteBool(show.Showing);
         ctx.SendPacketToServer(packet);
+    }
+
+    [HandlesCmsg(Opcode.CMSG_QUERY_INSPECT_ACHIEVEMENTS)]
+    public static void HandleQueryInspectAchievements(in Inspect inspect, in SessionContext ctx)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+            return;
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_QUERY_INSPECT_ACHIEVEMENTS);
+        packet.WritePackedGuid(inspect.Target.To64());
+        ctx.SendPacketToServer(packet);
+    }
+
+    // The paid character services: appearance, and race or faction. The server's answer
+    // (SMSG_CHAR_CUSTOMIZE / SMSG_CHAR_FACTION_CHANGE_RESULT) has no GUID when it fails.
+    [HandlesCmsg(Opcode.CMSG_CHAR_CUSTOMIZE)]
+    public static void HandleCharCustomize(in CharCustomize customize, in SessionContext ctx)
+    {
+        ctx.GetSession().GameState.PendingCustomizeGuid = customize.CharGuid;
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_CHAR_CUSTOMIZE);
+        WriteLegacyCustomization(packet, customize.CharGuid, customize.CharName, customize.SexId, customize.Customizations);
+        ctx.SendPacketToServer(packet);
+    }
+
+    [HandlesCmsg(Opcode.CMSG_CHAR_RACE_OR_FACTION_CHANGE)]
+    public static void HandleCharRaceOrFactionChange(in CharRaceOrFactionChange change, in SessionContext ctx)
+    {
+        ctx.GetSession().GameState.PendingCustomizeGuid = change.Guid;
+        WorldPacket packet = new WorldPacket(change.FactionChange ? Opcode.CMSG_CHAR_FACTION_CHANGE : Opcode.CMSG_CHAR_RACE_CHANGE);
+        WriteLegacyCustomization(packet, change.Guid, change.Name, change.SexId, change.Customizations);
+        packet.WriteUInt8((byte)change.RaceId);
+        ctx.SendPacketToServer(packet);
+    }
+
+    private static void WriteLegacyCustomization(WorldPacket packet, WowGuid128 guid, string name, Gender sex, List<ChrCustomizationChoice> customizations)
+    {
+        CharacterCustomizations.ConvertModernCustomizationsToLegacy(customizations, out byte skin, out byte face, out byte hairStyle, out byte hairColor, out byte facialHair);
+        packet.WriteGuid(guid.To64());
+        packet.WriteCString(name);
+        packet.WriteUInt8((byte)sex);
+        packet.WriteUInt8(skin);
+        packet.WriteUInt8(hairColor);
+        packet.WriteUInt8(hairStyle);
+        packet.WriteUInt8(facialHair);
+        packet.WriteUInt8(face);
     }
 
     [HandlesCmsg(Opcode.CMSG_INSPECT)]

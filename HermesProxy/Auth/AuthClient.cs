@@ -60,6 +60,14 @@ public partial class AuthClient
     TaskCompletionSource _hasRealmlist = null!;
     bool _realmlistRequestIsPending;
     byte[] _passwordHash = null!;
+
+    // Authenticator (security flag 0x04): typed as "password|123456" in the login box, since the
+    // modern client has no field for the code. A server without one gets the whole string as the
+    // password, so a password that merely ends in "|digits" still works.
+    string? _authenticatorToken;
+    string? _passwordWithToken;
+    byte[]? _passwordHashWithToken;
+    byte _challengeSecurityFlags;
     BigInteger _key;
     byte[] _m2 = null!;
     string _username = null!;
@@ -83,6 +91,19 @@ public partial class AuthClient
         _response = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _hasRealmlist = new(TaskCreationOptions.RunContinuationsAsynchronously);
         _realmlistRequestIsPending = false;
+
+        _authenticatorToken = null;
+        _passwordWithToken = null;
+        int bar = password.LastIndexOf('|');
+        if (bar > 0 && bar < password.Length - 1 && password.AsSpan(bar + 1).IndexOfAnyExceptInRange('0', '9') < 0)
+        {
+            _authenticatorToken = password.Substring(bar + 1);
+            _passwordWithToken = password;
+            password = password.Substring(0, bar);
+        }
+        _passwordHashWithToken = _passwordWithToken != null
+            ? SHA1.HashData(Encoding.ASCII.GetBytes($"{_username}:{_passwordWithToken}".ToUpper()))
+            : null;
 
         string authstring = $"{_username}:{password}";
         _passwordHash = SHA1.HashData(Encoding.ASCII.GetBytes(authstring.ToUpper()));
@@ -336,6 +357,11 @@ public partial class AuthClient
         byte[] challenge_salt = packet.ReadBytes(32);
         byte[] challenge_version = packet.ReadBytes(16);
         byte challenge_securityFlags = packet.ReadUInt8();
+        _challengeSecurityFlags = challenge_securityFlags;
+        if ((challenge_securityFlags & 0x04) == 0 && _passwordHashWithToken != null)
+            _passwordHash = _passwordHashWithToken; // no authenticator: the "|digits" were part of the password
+        else if ((challenge_securityFlags & 0x04) != 0 && _authenticatorToken == null)
+            AuthClientLogMessages.AuthenticatorTokenMissing(_melNet, _sourceFile, _netDirNone, _username);
 
         //Console.WriteLine("Received logon challenge");
 
@@ -479,8 +505,15 @@ public partial class AuthClient
         buffer.WriteBytes(A);
         buffer.WriteBytes(M1);
         buffer.WriteBytes(crc);
-        buffer.WriteUInt8(0);
-        buffer.WriteUInt8(0);
+        buffer.WriteUInt8(0); // number of keys
+        if ((_challengeSecurityFlags & 0x04) != 0 && _authenticatorToken != null)
+        {
+            buffer.WriteUInt8(0x04); // security flags: authenticator
+            buffer.WriteUInt8((byte)_authenticatorToken.Length);
+            buffer.WriteBytes(Encoding.ASCII.GetBytes(_authenticatorToken));
+        }
+        else
+            buffer.WriteUInt8(0); // security flags
 
         _debugTraceBreakpointHandler(buffer);
 

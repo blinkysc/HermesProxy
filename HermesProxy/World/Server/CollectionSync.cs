@@ -35,8 +35,10 @@ public static class CollectionSync
         bool summonedByUs = update.UnitData.SummonedBy == player || update.UnitData.CreatedBy == player;
         bool ownerMissing = (update.UnitData.SummonedBy == null || update.UnitData.SummonedBy.Value.IsEmpty())
             && (update.UnitData.CreatedBy == null || update.UnitData.CreatedBy.Value.IsEmpty());
+        // An ownerless companion is only ours if it is the one we summoned; any other player's
+        // pet in view used to be claimed as soon as we had one out.
         bool ours = !player.IsEmpty()
-            && (summonedByUs || ownerMissing || !state.SummonedBattlePetGuid.IsEmpty());
+            && (summonedByUs || (ownerMissing && legacyGuid == state.SummonedCompanionLegacyGuid));
         if (!ours)
             return;
 
@@ -66,7 +68,7 @@ public static class CollectionSync
         updateData.UnitData.Critter = state.SummonedCompanionCreatureGuid;
         var updatePacket = new UpdateObject(state);
         updatePacket.ObjectUpdates.Add(updateData);
-        session.WorldClient?.SendPacketToClient(updatePacket);
+        session.WorldClient?.SendPlayerValuesUpdate(updatePacket);
     }
 
     // WotLK "Learning" (55884) — same visual mount/companion items use when consumed
@@ -154,7 +156,7 @@ public static class CollectionSync
         updateData.EnsureActivePlayerData().Toys = toys;
         var updatePacket = new UpdateObject(state);
         updatePacket.ObjectUpdates.Add(updateData);
-        session.WorldClient.SendPacketToClient(updatePacket);
+        session.WorldClient.SendPlayerValuesUpdate(updatePacket);
     }
 
     public static void RefreshUsableToys(GlobalSessionData session)
@@ -171,6 +173,37 @@ public static class CollectionSync
 
         SendToys(session);
         session.WorldClient.SendPacketToClient(AccountToyUpdate.FromSession(state));
+    }
+
+    /// <summary>
+    /// Adds any heirloom the player carries to the account's collection and, when the collected
+    /// set differs from what the client last got, sends it both as the Heirlooms field and as
+    /// SMSG_ACCOUNT_HEIRLOOM_UPDATE.
+    /// </summary>
+    public static void RefreshHeirlooms(GlobalSessionData session)
+    {
+        if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
+            return;
+        var state = session.GameState;
+        if (state.CurrentPlayerGuid.IsEmpty() || session.WorldClient == null || state.CollectionFavorites == null)
+            return;
+
+        if (state.CollectCarriedHeirlooms())
+            session.AccountMetaDataMgr.SaveCollectionFavorites(state.CollectionFavorites);
+
+        int[] heirlooms = state.GetCollectedHeirloomsOrdered();
+        if (heirlooms.AsSpan().SequenceEqual(state.LastSentHeirlooms))
+            return;
+        state.LastSentHeirlooms = heirlooms;
+
+        var updateData = new ObjectUpdate(state.CurrentPlayerGuid, UpdateTypeModern.Values, session);
+        var activeData = updateData.EnsureActivePlayerData();
+        activeData.Heirlooms = new List<int>(heirlooms);
+        activeData.HeirloomFlags = new List<uint>(new uint[heirlooms.Length]);
+        var updatePacket = new UpdateObject(state);
+        updatePacket.ObjectUpdates.Add(updateData);
+        session.WorldClient.SendPlayerValuesUpdate(updatePacket);
+        session.WorldClient.SendPacketToClient(new AccountHeirloomUpdate(heirlooms));
     }
 
     static bool ToysMatch(uint[] left, uint[] right)

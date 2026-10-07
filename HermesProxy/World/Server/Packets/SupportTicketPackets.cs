@@ -138,3 +138,17 @@ class GMTicketCaseStatus : ServerPacket
         _worldPacket.FlushBits();
     }
 }
+
+public class ComplaintResult : ServerPacket
+{
+    public uint ComplaintType;
+    public byte Result;
+
+    public ComplaintResult() : base(Opcode.SMSG_COMPLAINT_RESULT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt32(ComplaintType);
+        _worldPacket.WriteUInt8(Result);
+    }
+}

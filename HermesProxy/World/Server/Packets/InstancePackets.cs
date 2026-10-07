@@ -303,3 +303,20 @@ class PendingRaidLock : ServerPacket
 }
 
 public readonly record struct InstanceLockResponse(bool AcceptLock);
+
+class InstanceEncounterUnit : ServerPacket
+{
+    public WowGuid128 Unit;
+    public byte TargetFramePriority;
+
+    public InstanceEncounterUnit(Opcode opcode) : base(opcode) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(Unit);
+        if (GetUniversalOpcode() != Opcode.SMSG_INSTANCE_ENCOUNTER_DISENGAGE_UNIT)
+        {
+            _worldPacket.WriteUInt8(TargetFramePriority);
+        }
+    }
+}

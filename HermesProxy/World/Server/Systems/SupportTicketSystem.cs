@@ -37,6 +37,16 @@ public static class SupportTicketSystem
             return;
         }
 
+        // "Report spam" has its own opcode on a 3.x server, which mutes the spammer for the
+        // reporter; a GM ticket would only queue it.
+        if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261
+            && LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056)
+            && complaint.MinorCategoryFlags.HasFlag(ReportMinorCategory.Spam))
+        {
+            SendSpamComplaint(in complaint, in ctx);
+            return;
+        }
+
         var ticketText = $"[REPORTED VIA QUICKMENU]\r\nI would like to report player '{targetPlayerName}'";
 
         if (!WowGuid128.IsUnknownPlayerGuid(complaint.TargetCharacterGuid))
@@ -94,6 +104,42 @@ public static class SupportTicketSystem
             packet.WriteBytes(Array.Empty<byte>()); // rest of the message are deflated chat lines
         }
 
+        ctx.SendPacketToServer(packet);
+    }
+
+    /// <summary>
+    /// CMSG_COMPLAINT: type 0 is a mail (its id), type 1 a chat line (how long ago, and its text).
+    /// </summary>
+    private static void SendSpamComplaint(in SupportTicketSubmitComplaint complaint, in SessionContext ctx)
+    {
+        bool isMail = complaint.SelectedMailInfo != null;
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_COMPLAINT);
+        packet.WriteUInt8(isMail ? (byte)0 : (byte)1);
+        packet.WriteGuid(complaint.TargetCharacterGuid.To64());
+        if (isMail)
+        {
+            packet.WriteUInt32(0);
+            packet.WriteUInt32(complaint.SelectedMailInfo!.MailId);
+            packet.WriteUInt32(0);
+        }
+        else
+        {
+            var lines = complaint.ChatLog.ChatLines;
+            var line = complaint.ChatLog.ReportedLineIdx is uint idx && idx < lines.Count
+                ? lines[(int)idx]
+                : lines.Count == 0 ? null : lines[^1];
+            uint secondsAgo = line != null ? (uint)Math.Max(0, (DateTime.UtcNow - line.Time.ToUniversalTime()).TotalSeconds) : 0;
+            string text = line?.Text ?? "";
+            if (!complaint.TextNote.IsEmpty())
+                text = text.Length != 0 ? text + " -- " + complaint.TextNote : complaint.TextNote;
+
+            packet.WriteUInt32(0);
+            packet.WriteUInt32(0);
+            packet.WriteUInt32(0);
+            packet.WriteUInt32(secondsAgo);
+            packet.WriteCString(text);
+        }
+        ctx.GetSession().GameState.LastComplaintSpamType = isMail ? 0u : 1u;
         ctx.SendPacketToServer(packet);
     }
 }

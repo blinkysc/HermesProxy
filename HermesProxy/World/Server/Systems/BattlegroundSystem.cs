@@ -27,6 +27,24 @@ public static class BattlegroundSystem
 {
     private static readonly Microsoft.Extensions.Logging.ILogger _melLog = Log.CreateMelLogger(Log.CategoryPacket);
 
+    // "Leave battleground" from the release dialog of a dead player.
+    [HandlesCmsg(Opcode.CMSG_HEARTH_AND_RESURRECT)]
+    public static void HandleHearthAndResurrect(in EmptyClientPacket request, in SessionContext ctx)
+    {
+        if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+            ctx.SendPacketToServer(new WorldPacket(Opcode.CMSG_HEARTH_AND_RESURRECT));
+    }
+
+    // The 3.3.5a server sends no result, so the client is answered at once.
+    [HandlesCmsg(Opcode.CMSG_REPORT_PVP_PLAYER_AFK)]
+    public static void HandleReportPvPPlayerAfk(in ReportPvPPlayerAFK report, in SessionContext ctx)
+    {
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_REPORT_PVP_PLAYER_AFK);
+        packet.WriteGuid(report.Offender.To64());
+        ctx.SendPacketToServer(packet);
+        ctx.SendPacketToClient(new ReportPvPPlayerAFKResult { Offender = report.Offender });
+    }
+
     [HandlesCmsg(Opcode.CMSG_BATTLEMASTER_JOIN)]
     public static void HandleBattlefieldJoin(in BattlemasterJoin join, in SessionContext ctx)
     {

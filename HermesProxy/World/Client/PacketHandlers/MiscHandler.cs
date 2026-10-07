@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using HermesProxy.Enums;
 using HermesProxy.World.Dispatch;
 using HermesProxy.World.Enums;
+using HermesProxy.World.Logging;
 using HermesProxy.World.Objects;
 using HermesProxy.World.Server;
 using HermesProxy.World.Server.Packets;
@@ -12,6 +13,8 @@ namespace HermesProxy.World.Client;
 
 public partial class WorldClient
 {
+    private static readonly Microsoft.Extensions.Logging.ILogger _melAccountData = Framework.Logging.Log.CreateMelLogger(Framework.Logging.Log.CategoryServer);
+
     // Handlers for SMSG opcodes coming the legacy world server
     [HandlesSmsg(Opcode.SMSG_PONG)]
     internal void HandlePingResponse(WorldPacket packet)
@@ -63,6 +66,26 @@ public partial class WorldClient
     [HandlesSmsg(Opcode.SMSG_ACCOUNT_DATA_TIMES)]
     internal void HandleAccountDataTimes(WorldPacket packet)
     {
+        if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+        {
+            packet.ReadUInt32(); // server time
+            packet.ReadUInt8();  // unknown, always 1
+            uint mask = packet.ReadUInt32();
+            var accountData = GetSession().AccountDataMgr;
+            for (int i = 0; i < AccountDataManager.ServerTypeCount; i++)
+            {
+                if ((mask & (1u << i)) != 0)
+                    accountData.ServerTimes[i] = packet.ReadUInt32();
+            }
+
+            // The server sends the global times at auth and the per-character ones at login. The
+            // client only expects the login one; the proxy answered the auth one itself.
+            bool forward = (mask & AccountDataManager.ServerPerCharacterMask) != 0;
+            AccountDataLogMessages.ServerTimes(_melAccountData, mask, forward);
+            if (!forward)
+                return;
+        }
+
         SendPacketToClient(WorldSocket.BuildAccountDataTimes(GetSession()));
 
         // These packets don't exist in Vanilla and we must send them here.
@@ -73,6 +96,45 @@ public partial class WorldClient
             SendPacketToClient(WorldSocket.BuildSetTimeZoneInformation());
             SendPacketToClient(WorldSocket.BuildSeasonInfo());
         }
+    }
+
+    // The server's copy of an account data type, asked for by ClientConfigSystem.HandleRequestAccountData
+    // because it was newer than the proxy's.
+    [HandlesSmsg(Opcode.SMSG_UPDATE_ACCOUNT_DATA)]
+    internal void HandleUpdateAccountData(WorldPacket packet)
+    {
+        packet.ReadUInt64(); // player guid
+        uint type = packet.ReadUInt32();
+        uint time = packet.ReadUInt32();
+        uint size = packet.ReadUInt32();
+        byte[] compressed = size != 0 ? packet.ReadToEnd() : [];
+        if (!AccountDataManager.IsSyncedWithServer(type))
+            return;
+
+        var accountData = GetSession().AccountDataMgr;
+        WowGuid128 guid = accountData.TakeAwaitingServer(type) ?? GetSession().GameState.CurrentPlayerGuid;
+        if (accountData.Data == null)
+            accountData.LoadAllData(GetSession().GameState.CurrentPlayerGuid);
+
+        var (modernSize, modernData) = LegacyAccountDataConverter.ToModern(type, size, compressed);
+        accountData.SaveData(guid, time, type, modernSize, modernData);
+        accountData.ServerTimes[type] = time;
+        AccountDataLogMessages.ReceivedFromServer(_melAccountData, type, time, size, modernData != compressed);
+        SendPacketToClient(new UpdateAccountData(accountData.Data![type]));
+    }
+
+    // Answer to CMSG_UPDATE_ACCOUNT_DATA; the modern client expects none.
+    [HandlesSmsg(Opcode.SMSG_UPDATE_ACCOUNT_DATA_COMPLETE)]
+    internal void HandleUpdateAccountDataComplete(WorldPacket packet)
+    {
+    }
+
+    // The server's client cache version, which the client compares to drop its cached queries.
+    [HandlesSmsg(Opcode.SMSG_CACHE_VERSION)]
+    internal void HandleCacheVersion(WorldPacket packet)
+    {
+        GetSession().LegacyCacheVersion = packet.ReadUInt32();
+        GetSession().RealmSocket?.SendClientCacheVersion(GetSession().LegacyCacheVersion);
     }
 
     [HandlesSmsg(Opcode.SMSG_BIND_POINT_UPDATE)]
@@ -172,19 +234,38 @@ public partial class WorldClient
     internal void HandleAreaTriggerMessage(WorldPacket packet)
     {
         uint length = packet.ReadUInt32();
-        string message = packet.ReadString(length);
+        string message = packet.ReadString(length).TrimEnd('\0');
 
-        if (GetSession().GameState.LastEnteredAreaTrigger != 0)
+        var state = GetSession().GameState;
+        if (state.LastEnteredAreaTrigger != 0)
         {
             AreaTriggerMessage denied = new AreaTriggerMessage();
-            denied.AreaTriggerID = GetSession().GameState.LastEnteredAreaTrigger;
+            denied.AreaTriggerID = state.LastEnteredAreaTrigger;
             SendPacketToClient(denied);
+            state.LastEnteredAreaTrigger = 0; // answered; a later message is not about it
         }
-        else
-        {
-            ChatPkt chat = new ChatPkt(GetSession(), ChatMessageTypeModern.System, message);
-            SendPacketToClient(chat);
-        }
+
+        // The reason ("You must be level 80...") goes on screen, as a native server shows it.
+        if (message.Length > 0)
+            SendPacketToClient(new PrintNotification { NotifyText = message });
+    }
+
+    [HandlesSmsg(Opcode.SMSG_TRIGGER_MOVIE)]
+    internal void HandleTriggerMovie(WorldPacket packet)
+    {
+        TriggerMovie movie = new();
+        movie.MovieID = packet.ReadUInt32();
+        SendPacketToClient(movie);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_OVERRIDE_LIGHT)]
+    internal void HandleOverrideLight(WorldPacket packet)
+    {
+        OverrideLight light = new();
+        light.AreaLightID = packet.ReadUInt32();
+        light.OverrideLightID = packet.ReadUInt32();
+        light.TransitionMilliseconds = packet.ReadUInt32();
+        SendPacketToClient(light);
     }
 
     [HandlesSmsg(Opcode.MSG_CORPSE_QUERY)]

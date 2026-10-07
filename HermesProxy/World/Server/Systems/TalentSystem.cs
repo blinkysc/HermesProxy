@@ -1,11 +1,12 @@
 using Framework.Logging;
+using HermesProxy.Enums;
 using HermesProxy.World.Dispatch;
 using HermesProxy.World.Enums;
 using HermesProxy.World.Server.Packets;
 
 namespace HermesProxy.World.Server.Systems;
 
-/// <summary>Pet talents and glyph removal.</summary>
+/// <summary>Pet talents, glyph removal and learning the talent frame's preview.</summary>
 public static class TalentSystem
 {
     // Modern V3_4_3 CMSG_PET_LEARN_TALENT (0x3554 / 13652) → legacy CMSG_PET_LEARN_TALENT (0x47A).
@@ -14,6 +15,22 @@ public static class TalentSystem
     // Modern client sends a separate opcode from CMSG_LEARN_TALENT (which is player-only).
     // Pet GUID is translated modern→legacy via existing GameSessionData.GetLegacyPetGuid
     // (project_pet_guid_fix infrastructure).
+    // "Learn" in the talent frame's preview mode: every previewed point at once.
+    [HandlesCmsg(Opcode.CMSG_LEARN_PREVIEW_TALENTS)]
+    public static void HandleLearnPreviewTalents(in LearnPreviewTalents preview, in SessionContext ctx)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+            return;
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_LEARN_PREVIEW_TALENTS);
+        packet.WriteUInt32((uint)preview.Talents.Count);
+        foreach (var (talentId, rank) in preview.Talents)
+        {
+            packet.WriteUInt32(talentId);
+            packet.WriteUInt32(rank);
+        }
+        ctx.SendPacketToServer(packet);
+    }
+
     [HandlesCmsg(Opcode.CMSG_PET_LEARN_TALENT)]
     public static void HandleLearnPetTalent(in LearnPetTalent talent, in SessionContext ctx)
     {

@@ -1600,7 +1600,15 @@ public partial class WorldClient
 
     byte ResolveAssignedRole(WowGuid128 guid, byte serverRole)
     {
-        if (GetSession().GameState.GroupAssignedRoles.TryGetValue(guid, out var assigned))
+        // A role the server reports wins: the proxy's own assignment is only for a server that
+        // has none, and kept past one it went stale on the next change.
+        var assignedRoles = GetSession().GameState.GroupAssignedRoles;
+        if (serverRole != 0)
+        {
+            assignedRoles.Remove(guid);
+            return serverRole;
+        }
+        if (assignedRoles.TryGetValue(guid, out var assigned))
             return assigned;
         return serverRole;
     }

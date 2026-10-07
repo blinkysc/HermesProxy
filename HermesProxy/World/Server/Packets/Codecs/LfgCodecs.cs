@@ -104,3 +104,12 @@ public static class DFProposalResponsePktCodec
         packet = new DFProposalResponsePkt(ticket, instanceId, proposalId, r.HasBit());
     }
 }
+
+public static class DFBootPlayerVotePktCodec
+{
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void Read(ref SpanPacketReader r, out DFBootPlayerVotePkt packet)
+    {
+        packet = new DFBootPlayerVotePkt(r.ReadBit());
+    }
+}

@@ -118,6 +118,50 @@ public static partial class GameData
     // short of WotLK and turned correct data into a startup crash.
     public static int[,] TaxiNodesGraph = new int[1, 1];
     public static FrozenDictionary<uint /*questId*/, uint /*questBit*/> QuestBits = FrozenDictionary<uint, uint>.Empty;
+    public static FrozenDictionary<uint /*questId*/, QuestReset> RepeatableQuests = FrozenDictionary<uint, QuestReset>.Empty;
+    public static FrozenDictionary<uint /*questId*/, int[] /*creature entries*/> QuestEnders = FrozenDictionary<uint, int[]>.Empty;
+    public static FrozenDictionary<uint /*mapId*/, MapDifficultyInfo> MapDifficulties = FrozenDictionary<uint, MapDifficultyInfo>.Empty;
+
+    /// <param name="InstanceType">MapTypes: 0 common, 1 instance, 2 raid, 3 battleground, 4 arena.</param>
+    /// <param name="Difficulties">The modern DifficultyIDs the map has, with their group size.</param>
+    public readonly record struct MapDifficultyInfo(byte InstanceType, (uint Difficulty, uint MaxPlayers)[] Difficulties);
+
+    public static bool IsDungeonOrRaidMap(uint mapId)
+    {
+        if (MapDifficulties.TryGetValue(mapId, out var info))
+            return info.InstanceType is 1 or 2;
+        return mapId > 1; // without the table: anything but the two continents
+    }
+
+    /// <summary>
+    /// The modern DifficultyID and group size for a map at the legacy server's difficulty.
+    /// </summary>
+    public static (uint DifficultyId, uint? GroupSize) GetModernMapDifficulty(uint mapId, uint legacyDifficulty)
+    {
+        if (!MapDifficulties.TryGetValue(mapId, out var info))
+            return mapId <= 1 ? (0u, null) : (1u, 5u);
+
+        uint wanted;
+        if (info.InstanceType == 1)
+            wanted = legacyDifficulty == 1 ? 2u : 1u; // dungeon: heroic / normal
+        else if (info.InstanceType == 2)
+            wanted = (uint)RaidDifficulties.ToLegacyId((byte)legacyDifficulty);
+        else
+            return (0u, null);
+
+        var difficulties = info.Difficulties;
+        if (difficulties.Length == 0)
+            return (wanted, null);
+        foreach (var (difficulty, maxPlayers) in difficulties)
+        {
+            if (difficulty == wanted)
+                return (difficulty, maxPlayers);
+        }
+        return (difficulties[0].Difficulty, difficulties[0].MaxPlayers);
+    }
+
+    public static QuestReset GetQuestReset(uint questId) =>
+        RepeatableQuests.TryGetValue(questId, out var reset) ? reset : QuestReset.None;
     public static FrozenDictionary<int /*worldMapAreaId (legacy 3.3.5a)*/, int /*uiMapId (modern build)*/> WorldMapAreaIDToUiMapID = FrozenDictionary<int, int>.Empty;
 
     // From Server
@@ -429,6 +473,22 @@ public static partial class GameData
     }
 
     /// <summary>
+    /// The gem behind a legacy socket enchantment. Legacy items carry their socketed gems as the
+    /// enchantments in slots 2-4; the modern client wants them as Gems[0-2].
+    /// </summary>
+    public static Server.Packets.ItemGemData? GemFromLegacyEnchantSlot(int enchantSlot, uint enchantId)
+    {
+        if (enchantSlot < 2 || enchantSlot > 4 || enchantId == 0)
+            return null;
+        uint gemItemId = GetGemFromEnchantId(enchantId);
+        if (gemItemId == 0)
+            return null;
+        var gem = new Server.Packets.ItemGemData { Slot = (byte)(enchantSlot - 2) };
+        gem.Item.ItemID = gemItemId;
+        return gem;
+    }
+
+    /// <summary>
     /// Packs a BarberShopStyle lookup key. The four parts are all byte-ranged in 3.3.5a.
     /// </summary>
     private static uint PackBarberShopStyleKey(byte type, byte race, byte sex, byte data)
@@ -705,6 +765,9 @@ public static partial class GameData
             LoadTaxiPaths,
             LoadTaxiPathNodesGraph,
             LoadQuestBits,
+            LoadRepeatableQuests,
+            LoadQuestEnders,
+            LoadMapDifficulties,
             LoadWorldMapAreaIDToUiMapID,
             LoadHotfixes
         );
@@ -2188,6 +2251,78 @@ public static partial class GameData
         QuestBits = dict.ToFrozenDictionary();
     }
 
+    /// <summary>QuestRepeatable_N.csv: ID, Reset (daily, weekly, monthly, seasonal or repeatable).</summary>
+    public static void LoadRepeatableQuests()
+    {
+        var path = Path.Combine("CSV", $"QuestRepeatable_{LegacyVersion.ExpansionVersion}.csv");
+        if (!File.Exists(path))
+            return;
+
+        using var reader = Sep.Reader(o => o with { HasHeader = true }).FromFile(path);
+
+        Dictionary<uint, QuestReset> dict = [];
+        foreach (var row in reader)
+        {
+            QuestReset reset = row[1].Span switch
+            {
+                "daily" => QuestReset.Daily,
+                "weekly" => QuestReset.Weekly,
+                "monthly" => QuestReset.Monthly,
+                "seasonal" => QuestReset.Seasonal,
+                "repeatable" => QuestReset.Repeatable,
+                _ => QuestReset.None,
+            };
+            if (reset != QuestReset.None)
+                dict[uint.Parse(row[0].Span)] = reset;
+        }
+        RepeatableQuests = dict.ToFrozenDictionary();
+    }
+
+    /// <summary>QuestEnders_N.csv: QuestID, Enders (space-separated creature entries).</summary>
+    public static void LoadQuestEnders()
+    {
+        var path = Path.Combine("CSV", $"QuestEnders_{LegacyVersion.ExpansionVersion}.csv");
+        if (!File.Exists(path))
+            return;
+
+        using var reader = Sep.Reader(o => o with { HasHeader = true }).FromFile(path);
+
+        Dictionary<uint, int[]> dict = [];
+        foreach (var row in reader)
+        {
+            string[] enders = row[1].ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            dict[uint.Parse(row[0].Span)] = Array.ConvertAll(enders, e => (int)uint.Parse(e));
+        }
+        QuestEnders = dict.ToFrozenDictionary();
+    }
+
+    /// <summary>
+    /// MapDifficultyN.csv: MapID, InstanceType, Difficulties (space-separated DifficultyID:MaxPlayers).
+    /// </summary>
+    public static void LoadMapDifficulties()
+    {
+        var path = Path.Combine("CSV", $"MapDifficulty{ModernVersion.ExpansionVersion}.csv");
+        if (!File.Exists(path))
+            return;
+
+        using var reader = Sep.Reader(o => o with { HasHeader = true }).FromFile(path);
+
+        Dictionary<uint, MapDifficultyInfo> dict = [];
+        foreach (var row in reader)
+        {
+            uint mapId = uint.Parse(row[0].Span);
+            byte instanceType = byte.Parse(row[1].Span);
+            var difficulties = new List<(uint, uint)>();
+            foreach (string pair in row[2].ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            {
+                int colon = pair.IndexOf(':');
+                difficulties.Add((uint.Parse(pair.AsSpan(0, colon)), uint.Parse(pair.AsSpan(colon + 1))));
+            }
+            dict[mapId] = new MapDifficultyInfo(instanceType, difficulties.ToArray());
+        }
+        MapDifficulties = dict.ToFrozenDictionary();
+    }
+
     /// <summary>
     /// Legacy 3.3.5a WorldMapArea id to the UiMap id the connected modern client expects.
     /// The id sets differ per client generation, so the table is version-suffixed like the
@@ -3338,7 +3473,7 @@ public static partial class GameData
         if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261)
         {
             // V3_4_3 (ItemSparseHandler341): StartQuestID (Int32) + ItemRange (Single).
-            buffer.WriteInt32(0);                           // StartQuestID
+            buffer.WriteInt32((int)item.StartQuestId);      // StartQuestID
             buffer.WriteFloat(item.RangedMod);              // ItemRange
         }
         else
@@ -3406,7 +3541,8 @@ public static partial class GameData
         buffer.WriteUInt16(0);
         buffer.WriteUInt16((ushort)item.ItemSet);
         buffer.WriteUInt16((ushort)item.LockId);
-        buffer.WriteUInt16((ushort)item.StartQuestId);
+        if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261) // V3_4_3 has it as Int32 above
+            buffer.WriteUInt16((ushort)item.StartQuestId);
         buffer.WriteUInt16((ushort)item.PageText);
         buffer.WriteUInt16((ushort)item.Delay);
         buffer.WriteUInt16((ushort)item.RequiredRepFaction);

@@ -454,3 +454,18 @@ public static class SetRoleCodecPreWotLKClassic
         packet = new SetRole(partyIndex, changedUnit, role);
     }
 }
+
+public static class SetPartyAssignmentCodec
+{
+    public static void Read(ref SpanPacketReader r, out SetPartyAssignment packet)
+    {
+        bool hasPartyIndex = r.ReadBit();
+        bool set = r.ReadBit();
+        r.ResetBitPos();
+        byte assignment = r.ReadUInt8();
+        WowGuid128 target = r.ReadPackedGuid128();
+        if (hasPartyIndex)
+            r.ReadUInt8(); // PartyIndex: the legacy server has one party
+        packet = new SetPartyAssignment(assignment, set, target);
+    }
+}

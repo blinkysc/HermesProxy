@@ -37,6 +37,17 @@ public static class QuestSystem
     private static readonly string _sourceFile = nameof(WorldSocket).PadRight(15);
     private static readonly string _netDirRecv = Log.FormatDir(LogNetDir.C2P);
 
+    // Where to turn a quest in (the map and quest tracker). The legacy server cannot be asked;
+    // the answer comes from QuestEnders_N.csv, built from the 3.3.5a world database.
+    [HandlesCmsg(Opcode.CMSG_QUERY_QUEST_COMPLETION_NPCS)]
+    public static void HandleQueryQuestCompletionNpcs(in QueryQuestCompletionNPCs query, in SessionContext ctx)
+    {
+        QuestCompletionNPCResponse response = new();
+        foreach (int questId in query.QuestIDs)
+            response.Quests.Add((questId, GameData.QuestEnders.TryGetValue((uint)questId, out int[]? enders) ? enders : []));
+        ctx.SendPacketToClient(response);
+    }
+
     [HandlesCmsg(Opcode.CMSG_QUEST_GIVER_QUERY_QUEST)]
     public static void HandleQuestGiverQueryQuest(in QuestGiverQueryQuest quest, in SessionContext ctx)
     {

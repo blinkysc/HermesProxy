@@ -1160,3 +1160,32 @@ public readonly record struct SplitGuildBankItem(
     byte BankTab2,
     byte BankSlot2,
     uint StackCount);
+
+public struct GuildEventEntry
+{
+    public WowGuid128 PlayerGUID;
+    public WowGuid128 OtherGUID;
+    public byte TransactionType;
+    public byte RankID;
+    public uint TransactionDate;
+}
+
+class GuildEventLogQueryResults : ServerPacket
+{
+    public List<GuildEventEntry> Entries = new List<GuildEventEntry>();
+
+    public GuildEventLogQueryResults() : base(Opcode.SMSG_GUILD_EVENT_LOG_QUERY_RESULTS) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(Entries.Count);
+        foreach (GuildEventEntry entry in Entries)
+        {
+            _worldPacket.WritePackedGuid128(entry.PlayerGUID);
+            _worldPacket.WritePackedGuid128(entry.OtherGUID);
+            _worldPacket.WriteUInt8(entry.TransactionType);
+            _worldPacket.WriteUInt8(entry.RankID);
+            _worldPacket.WriteUInt32(entry.TransactionDate);
+        }
+    }
+}

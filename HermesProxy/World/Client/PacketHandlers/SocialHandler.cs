@@ -93,6 +93,19 @@ public partial class WorldClient
             contacts.Contacts.Add(contact);
         }
 
+        // A list that carries the ignores is the whole ignore list: chat from those players is
+        // filtered against it.
+        if (contacts.Flags.HasAnyFlag(SocialFlag.Ignored))
+        {
+            var ignored = new HashSet<WowGuid128>();
+            foreach (var contact in contacts.Contacts)
+            {
+                if (contact.TypeFlags.HasAnyFlag(SocialFlag.Ignored))
+                    ignored.Add(contact.Guid);
+            }
+            GetSession().GameState.IgnoredPlayers = ignored;
+        }
+
         SendPacketToClient(contacts);
     }
 

@@ -147,4 +147,11 @@ internal static partial class AuthClientLogMessages
         string Address,
         int Port,
         double Seconds);
+
+    [LoggerMessage(EventId = 317, Level = LogLevel.Warning, Message = "Account {Username} uses an authenticator: log in with the password followed by |code, e.g. secret|123456")]
+    public static partial void AuthenticatorTokenMissing(
+        ILogger logger,
+        string SourceFile,
+        string NetDir,
+        string Username);
 }

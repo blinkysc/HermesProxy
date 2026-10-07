@@ -89,7 +89,9 @@ public static class AuctionSystem
 
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
         {
-            packet.WriteBool(auction.ExactMatch);
+            // 3.3.5a reads this byte as getAll, the whole-house scan, not exact match: a client
+            // exact-match search asked the server for every auction there is.
+            packet.WriteBool(false);
             packet.WriteUInt8((byte)auction.Sorts.Count);
 
             foreach (var sort in auction.Sorts)

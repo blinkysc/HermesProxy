@@ -2,6 +2,7 @@ using Framework.Constants;
 using HermesProxy.World.Enums;
 using HermesProxy.World.Objects;
 using System.Collections.Generic;
+using System;
 
 namespace HermesProxy.World.Server.Packets;
 
@@ -37,12 +38,17 @@ public class AllAchievementData : ServerPacket
 
     public override void Write()
     {
-        _worldPacket.WriteInt32(Earned.Count);
-        _worldPacket.WriteInt32(Progress.Count);
+        WriteData(_worldPacket);
+    }
+
+    public void WriteData(WorldPacket packet)
+    {
+        packet.WriteInt32(Earned.Count);
+        packet.WriteInt32(Progress.Count);
         foreach (var earned in Earned)
-            earned.Write(_worldPacket);
+            earned.Write(packet);
         foreach (var progress in Progress)
-            progress.Write(_worldPacket);
+            progress.Write(packet);
     }
 }
 
@@ -110,5 +116,51 @@ public class AchievementEarnedPkt : ServerPacket
         _worldPacket.WriteUInt32(EarnerVirtualRealm);
         _worldPacket.WriteBit(Initial);
         _worldPacket.FlushBits();
+    }
+}
+
+public class BroadcastAchievement : ServerPacket
+{
+    public string Name = "";
+    public bool GuildAchievement;
+    public WowGuid128 PlayerGUID;
+    public uint AchievementID;
+
+    public BroadcastAchievement() : base(Opcode.SMSG_BROADCAST_ACHIEVEMENT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteBits(Name.GetByteCount(), 7);
+        _worldPacket.WriteBit(GuildAchievement);
+        _worldPacket.FlushBits();
+        _worldPacket.WritePackedGuid128(PlayerGUID);
+        _worldPacket.WriteUInt32(AchievementID);
+        _worldPacket.WriteString(Name);
+    }
+}
+
+public class RespondInspectAchievements : ServerPacket
+{
+    public WowGuid128 Player;
+    public AllAchievementData Data = new AllAchievementData();
+
+    public RespondInspectAchievements() : base(Opcode.SMSG_RESPOND_INSPECT_ACHIEVEMENTS) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(Player);
+        Data.WriteData(_worldPacket);
+    }
+}
+
+public class TitleEarned : ServerPacket
+{
+    public uint Index;
+
+    public TitleEarned(Opcode opcode) : base(opcode) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt32(Index);
     }
 }

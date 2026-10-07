@@ -105,6 +105,32 @@ public static class SpellSystem
         }    
     }
 
+    // Mirror Image and the like ask how the copy looks (SMSG_MIRROR_IMAGE_COMPONENTED_DATA).
+    [HandlesCmsg(Opcode.CMSG_GET_MIRROR_IMAGE_DATA)]
+    public static void HandleGetMirrorImageData(in GetMirrorImageData request, in SessionContext ctx)
+    {
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_GET_MIRROR_IMAGE_DATA);
+        packet.WriteGuid(request.UnitGUID.To64());
+        ctx.SendPacketToServer(packet);
+    }
+
+    // The aim of a spell fired along a trajectory (vehicle cannons, e.g. Wintergrasp, Ulduar).
+    [HandlesCmsg(Opcode.CMSG_UPDATE_MISSILE_TRAJECTORY)]
+    public static void HandleUpdateMissileTrajectory(in UpdateMissileTrajectory update, in SessionContext ctx)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+            return;
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_UPDATE_MISSILE_TRAJECTORY);
+        packet.WriteGuid(update.Guid.To64());
+        packet.WriteUInt32((uint)update.SpellID);
+        packet.WriteFloat(update.Pitch);
+        packet.WriteFloat(update.Speed);
+        packet.WriteVector3(update.FirePos);
+        packet.WriteVector3(update.ImpactPos);
+        packet.WriteUInt8(0); // no movement block follows
+        ctx.SendPacketToServer(packet);
+    }
+
     [HandlesCmsg(Opcode.CMSG_CAST_SPELL)]
     public static void HandleCastSpell(in CastSpell cast, in SessionContext ctx)
     {

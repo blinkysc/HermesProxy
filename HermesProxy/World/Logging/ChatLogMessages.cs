@@ -38,6 +38,10 @@ internal static partial class ChatLogMessages
         Message = "[ChatTrace] <- legacy SMSG_CHAT (WotLK): chatType={ChatType} -> modern={ModernType} lang={Language} senderName=\"{SenderName}\" channel=\"{Channel}\" textLen={TextLength} preview=\"{Preview}\"")]
     public static partial void ReceivedFromLegacy(ILogger logger, string ChatType, string ModernType, uint Language, string SenderName, string Channel, int TextLength, string Preview);
 
+    [LoggerMessage(EventId = 1405, Level = LogLevel.Debug,
+        Message = "[Chat] addon message from '{Prefix}' is {Length} bytes, over the legacy server's 255; not sent")]
+    public static partial void AddonMessageTooLong(ILogger logger, string prefix, int length);
+
     /// <summary>
     /// The 30-char preview the old traces built inline. Only ever called from inside an
     /// <c>IsEnabled(LogLevel.Trace)</c> guard, so the <c>Substring</c> is not paid in production.

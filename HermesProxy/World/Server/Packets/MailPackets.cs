@@ -339,3 +339,18 @@ public class MailCommandResult : ServerPacket, ISpanWritable
     public long AttachID;
     public uint QtyInInventory;
 }
+
+public class ShowMailbox : ServerPacket
+{
+    public WowGuid128 Guid;
+
+    public ShowMailbox() : base(Opcode.SMSG_SHOW_BANK, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(Guid);
+        _worldPacket.WriteInt32(17);
+        _worldPacket.WriteBit(true);
+        _worldPacket.FlushBits();
+    }
+}

@@ -33,10 +33,31 @@ public static class LfgSystem
         ctx.SendPacketToServer(legacy);
     }
 
+    // The client polls this; the server is asked at most every 5 s, which is enough to bring a
+    // queue or proposal the client missed (a reload, a zone change) back into view.
+    private const long JoinStatusMinIntervalMs = 5000;
+
     [HandlesCmsg(Opcode.CMSG_DF_GET_JOIN_STATUS)]
     public static void HandleDFGetJoinStatus(in DFGetJoinStatusPkt packet, in SessionContext ctx)
     {
-        // No equivalent legacy request; client polls this — drop silently.
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_3_0_10958))
+            return;
+        var state = ctx.GetSession().GameState;
+        long now = Environment.TickCount64;
+        if (state.LastLfgJoinStatusRequest != 0 && now - state.LastLfgJoinStatusRequest < JoinStatusMinIntervalMs)
+            return;
+        state.LastLfgJoinStatusRequest = now;
+        ctx.SendPacketToServer(new WorldPacket(Opcode.CMSG_DF_GET_JOIN_STATUS));
+    }
+
+    [HandlesCmsg(Opcode.CMSG_DF_BOOT_PLAYER_VOTE)]
+    public static void HandleDFBootPlayerVote(in DFBootPlayerVotePkt packet, in SessionContext ctx)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_3_0_10958))
+            return;
+        WorldPacket vote = new WorldPacket(Opcode.CMSG_LFG_SET_BOOT_VOTE);
+        vote.WriteBool(packet.Vote);
+        ctx.SendPacketToServer(vote);
     }
 
     [HandlesCmsg(Opcode.CMSG_DF_JOIN)]

@@ -96,6 +96,7 @@ public static class MiscSystem
     [HandlesCmsg(Opcode.CMSG_OPENING_CINEMATIC)]
     [HandlesCmsg(Opcode.CMSG_NEXT_CINEMATIC_CAMERA)]
     [HandlesCmsg(Opcode.CMSG_COMPLETE_CINEMATIC)]
+    [HandlesCmsg(Opcode.CMSG_COMPLETE_MOVIE)]
     public static void HandleCinematicPacket(Opcode opcode, in ClientCinematicPkt cinematic, in SessionContext ctx)
     {
         WorldPacket packet = new WorldPacket(opcode);
@@ -146,6 +147,15 @@ public static class MiscSystem
         // when the client rejects what the proxy serialized.
         Log.Print(LogType.Error,
             $"CMSG_OBJECT_UPDATE_FAILED guid={fail.ObjectGuid} highType={fail.ObjectGuid.GetHighType()} entry={fail.ObjectGuid.GetEntry()}.");
+
+        // The client dropped the object: stop sending it deltas until a fresh create brings it
+        // back. The player's own object is never dropped for good.
+        var state = ctx.GetSession().GameState;
+        if (fail.ObjectGuid == state.CurrentPlayerGuid)
+            return;
+        state.ClientKnownGuids.Remove(fail.ObjectGuid);
+        if (fail.ObjectGuid == state.CurrentPetGuid)
+            state.ClientHasPetObject = false;
     }
 
     [HandlesCmsg(Opcode.CMSG_SET_DUNGEON_DIFFICULTY)]

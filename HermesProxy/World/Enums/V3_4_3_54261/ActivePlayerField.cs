@@ -305,8 +305,9 @@ public enum ActivePlayerField
     [DescriptorCreatePlaceholder(DescriptorType.Int32)]
     ACTIVEPLAYER_CREATE_MAX_CREATURE_SCALING_LEVEL_PLACEHOLDER,
 
-    // bit 616 (parent 615): NoReagentCostMask[4] — live property exists; TODO per-element read.
-    [DescriptorCreatePlaceholder(DescriptorType.UInt32, Count = 4)]
+    // bit 616 (parent 615): NoReagentCostMask[4], from PLAYER_NO_REAGENT_COST_1.
+    [DescriptorCreatePlaceholder(DescriptorType.UInt32, Count = 4,
+        CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteCreateActivePlayerNoReagentCostMask))]
     ACTIVEPLAYER_CREATE_NO_REAGENT_COST_MASK_PLACEHOLDER,
 
     [DescriptorCreateField(nameof(ActivePlayerData.PetSpellPower), DescriptorType.Int32)]
@@ -391,8 +392,9 @@ public enum ActivePlayerField
     // ---- Create slice 4: dynamic-field prefixes, payloads and bit tail ----
 
     // Resize prefixes: ResearchSites, ResearchSiteProgress, Research,
-    // DailyQuestsCompleted, AvailableQuestLineXQuestIDs, Field_1000 — all empty.
-    [DescriptorCreatePlaceholder(DescriptorType.UInt32, Count = 6)]
+    // DailyQuestsCompleted, AvailableQuestLineXQuestIDs, Field_1000 — all empty but the dailies.
+    [DescriptorCreatePlaceholder(DescriptorType.UInt32, Count = 6,
+        CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteCreateActivePlayerResearchAndQuestResizePrefixes))]
     ACTIVEPLAYER_CREATE_DYNAMIC_RESIZE_PREFIXES_A_PLACEHOLDER,
 
     // Heirlooms.Resize + HeirloomFlags.Resize — the two non-zero prefixes.
@@ -514,6 +516,36 @@ public enum ActivePlayerField
         CustomPredicate = "HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.HasAnyKnownTitle(src.KnownTitles)")]
     ACTIVEPLAYER_KNOWN_TITLES,
 
+    // DailyQuestsCompleted: DynamicUpdateField<int32, 0, 4>. Sent whole whenever a daily slot
+    // changes, so a daily done today stays greyed out at its quest giver.
+    [DescriptorMaskPreamble(bit: 4,
+        customWriter: nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerDailyQuestsPreamble))]
+    ACTIVEPLAYER_DAILY_QUESTS_COMPLETED_PREAMBLE,
+
+    [DescriptorUpdateField(nameof(ActivePlayerData.DailyQuestsCompleted), DescriptorType.Int32, bit: 4, ParentBit = 0,
+        CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerDailyQuestsBody),
+        CustomPredicate = "src.HasDailyQuestsUpdate")]
+    ACTIVEPLAYER_DAILY_QUESTS_COMPLETED,
+
+    // Heirlooms / HeirloomFlags: DynamicUpdateField<int32, 0, 7> and <uint32, 0, 8>.
+    [DescriptorMaskPreamble(bit: 7,
+        customWriter: nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerHeirloomsPreamble))]
+    ACTIVEPLAYER_HEIRLOOMS_PREAMBLE,
+
+    [DescriptorUpdateField(nameof(ActivePlayerData.Heirlooms), DescriptorType.Int32, bit: 7, ParentBit = 0,
+        CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerHeirloomsBody),
+        CustomPredicate = "src.Heirlooms != null")]
+    ACTIVEPLAYER_HEIRLOOMS,
+
+    [DescriptorMaskPreamble(bit: 8,
+        customWriter: nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerHeirloomFlagsPreamble))]
+    ACTIVEPLAYER_HEIRLOOM_FLAGS_PREAMBLE,
+
+    [DescriptorUpdateField(nameof(ActivePlayerData.HeirloomFlags), DescriptorType.UInt32, bit: 8, ParentBit = 0,
+        CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerHeirloomFlagsBody),
+        CustomPredicate = "src.HeirloomFlags != null")]
+    ACTIVEPLAYER_HEIRLOOM_FLAGS,
+
     // Toys: DynamicUpdateField<int32, 0, 9> in Wrathion UpdateFields.h.
     // PlayerHasToy / Already known / journal count read this field, not
     // SMSG_ACCOUNT_TOY_UPDATE. A live Values write is what makes learn
@@ -526,6 +558,16 @@ public enum ActivePlayerField
         CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerToysBody),
         CustomPredicate = "src.Toys != null && src.Toys.Count > 0")]
     ACTIVEPLAYER_TOYS,
+
+    // SelfResSpells: DynamicUpdateField<int32, 0, 12>.
+    [DescriptorMaskPreamble(bit: 12,
+        customWriter: nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerSelfResSpellsPreamble))]
+    ACTIVEPLAYER_SELF_RES_SPELLS_PREAMBLE,
+
+    [DescriptorUpdateField(nameof(ActivePlayerData.SelfResSpells), DescriptorType.Int32, bit: 12, ParentBit = 0,
+        CustomWriter = nameof(HermesProxy.World.Objects.Version.V3_4_3_54261.ObjectUpdateBuilder.WriteUpdateActivePlayerSelfResSpellsBody),
+        CustomPredicate = "src.SelfResSpells != null")]
+    ACTIVEPLAYER_SELF_RES_SPELLS,
 
     // ===========================================================================
     // Update — Block 0 scalars (group bit 0, bits 26-37)

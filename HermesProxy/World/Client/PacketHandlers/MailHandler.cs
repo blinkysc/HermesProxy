@@ -14,6 +14,20 @@ namespace HermesProxy.World.Client;
 public partial class WorldClient
 {
     // Handlers for SMSG opcodes coming the legacy world server
+    // A mailbox was used; on 3.4.3 the mail frame opens through the NPC interaction packet.
+    [HandlesSmsg(Opcode.SMSG_SHOW_MAILBOX)]
+    internal void HandleShowMailbox(WorldPacket packet)
+    {
+        WowGuid128 mailbox = packet.ReadGuid().To128(GetSession().GameState);
+        GetSession().GameState.CurrentInteractedWithGO = mailbox;
+        if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261)
+        {
+            ShowMailbox show = new();
+            show.Guid = mailbox;
+            SendPacketToClient(show);
+        }
+    }
+
     [HandlesSmsg(Opcode.SMSG_NOTIFY_RECEIVED_MAIL)]
     internal void HandleNotifyReceivedMail(WorldPacket packet)
     {
@@ -241,12 +255,25 @@ public partial class WorldClient
             enchant.Slot = k;
             if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
             {
-                enchant.Charges = packet.ReadInt32();
+                // Charges, duration, id per the 3.3.5a client; AzerothCore writes id, duration,
+                // charges. An enchantment always has an id and charges are usually 0, so a zero
+                // first word with a non-zero third is the swapped order.
+                uint first = packet.ReadUInt32();
                 enchant.Expiration = packet.ReadUInt32();
+                uint third = packet.ReadUInt32();
+                bool swapped = first == 0 && third != 0;
+                enchant.ID = swapped ? third : first;
+                enchant.Charges = (int)(swapped ? first : third);
             }
-            enchant.ID = packet.ReadUInt32();
+            else
+                enchant.ID = packet.ReadUInt32();
             if (enchant.ID != 0)
+            {
                 mailItem.Enchants.Add(enchant);
+                var gem = GameData.GemFromLegacyEnchantSlot(k, enchant.ID);
+                if (gem != null)
+                    mailItem.Gems.Add(gem);
+            }
         }
 
         mailItem.Item.RandomPropertiesID = packet.ReadUInt32();

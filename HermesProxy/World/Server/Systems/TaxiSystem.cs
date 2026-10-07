@@ -69,7 +69,11 @@ public static class TaxiSystem
         {
             HashSet<uint> path = GetTaxiPath(ctx.GetSession().GameState.CurrentTaxiNode, taxi.Node, ctx.GetSession().GameState.UsableTaxiNodes);
             if (path.Count <= 1) // no nodes found
+            {
+                // Without an answer the flight map stayed waiting and the next click did nothing.
+                ctx.SendPacketToClient(new ActivateTaxiReplyPkt { Reply = ActivateTaxiReply.NoSuchPath });
                 return;
+            }
 
             WorldPacket packet = new WorldPacket(Opcode.CMSG_ACTIVATE_TAXI_EXPRESS);
             packet.WriteGuid(taxi.FlightMaster.To64());

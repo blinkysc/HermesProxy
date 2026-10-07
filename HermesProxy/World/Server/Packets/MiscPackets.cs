@@ -1320,3 +1320,31 @@ public class ZoneUnderAttack : ServerPacket, ISpanWritable
 
     public int AreaID;
 }
+
+class OverrideLight : ServerPacket
+{
+    public uint AreaLightID;
+    public uint OverrideLightID;
+    public uint TransitionMilliseconds;
+
+    public OverrideLight() : base(Opcode.SMSG_OVERRIDE_LIGHT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt32(AreaLightID);
+        _worldPacket.WriteUInt32(OverrideLightID);
+        _worldPacket.WriteUInt32(TransitionMilliseconds);
+    }
+}
+
+public class TriggerMovie : ServerPacket
+{
+    public uint MovieID;
+
+    public TriggerMovie() : base(Opcode.SMSG_TRIGGER_MOVIE) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt32(MovieID);
+    }
+}

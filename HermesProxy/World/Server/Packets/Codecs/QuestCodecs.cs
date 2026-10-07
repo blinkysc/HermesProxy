@@ -155,3 +155,17 @@ public static class QuestPushResultResponseCodec
         packet = new QuestPushResultResponse(senderGuid, questId, result);
     }
 }
+
+public static class QueryQuestCompletionNPCsCodec
+{
+    // MAX_QUEST_LOG_SIZE: the client asks for its quest log.
+    private const uint MaxQuests = 125;
+
+    public static void Read(ref SpanPacketReader r, out QueryQuestCompletionNPCs packet)
+    {
+        var questIds = new int[Math.Min(r.ReadUInt32(), MaxQuests)];
+        for (int i = 0; i < questIds.Length; i++)
+            questIds[i] = r.ReadInt32();
+        packet = new QueryQuestCompletionNPCs(questIds);
+    }
+}

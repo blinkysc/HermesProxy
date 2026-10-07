@@ -110,6 +110,10 @@ public static class MovementSystem
         uint legacyOpcode = ClientMoveToLegacyMsg.TryGetValue(universalOpcode, out Opcode legacyMsg)
             ? LegacyVersion.GetCurrentOpcode(legacyMsg)
             : 0u;
+        // A client opcode the legacy server has under the same name (CMSG_MOVE_SET_FLY and the
+        // like) goes as itself rather than as a facing change.
+        if (legacyOpcode == 0)
+            legacyOpcode = LegacyVersion.GetCurrentOpcode(universalOpcode);
         if (legacyOpcode == 0)
             legacyOpcode = LegacyVersion.GetCurrentOpcode(Opcode.MSG_MOVE_SET_FACING);
 
@@ -430,6 +434,22 @@ public static class MovementSystem
         WorldPacket packet = new WorldPacket(Opcode.CMSG_REQUEST_VEHICLE_SWITCH_SEAT);
         packet.WritePackedGuid(request.Vehicle.To64());
         packet.WriteInt8((sbyte)request.SeatIndex);
+        ctx.SendPacketToServer(packet);
+    }
+
+    // A seat change straight into another vehicle's seat (e.g. a passenger moving between the
+    // two seats of a multi-seat mount), with the mover's current movement.
+    [HandlesCmsg(Opcode.CMSG_MOVE_CHANGE_VEHICLE_SEATS)]
+    public static void HandleMoveChangeVehicleSeats(in MoveChangeVehicleSeats request, in SessionContext ctx)
+    {
+        if (LegacyVersion.RemovedInVersion(ClientVersionBuild.V3_0_2_9056))
+            return;
+
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_CHANGE_SEATS_ON_CONTROLLED_VEHICLE);
+        packet.WritePackedGuid(request.Move.Guid.To64());
+        LegacyMovementCodec.Write(packet, in request.Move.MoveInfo);
+        packet.WritePackedGuid(request.DstVehicle.To64());
+        packet.WriteInt8((sbyte)request.DstSeatIndex);
         ctx.SendPacketToServer(packet);
     }
 

@@ -20,8 +20,25 @@ public partial class WorldClient
         if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
             return;
 
-        var gameState = GetSession().GameState;
-        var ownerGuid = gameState.CurrentPlayerGuid;
+        SendPacketToClient(ReadLegacyAchievementData(packet, GetSession().GameState.CurrentPlayerGuid));
+    }
+
+    // Another player's achievements, for the inspect and compare frames.
+    [HandlesSmsg(Opcode.SMSG_RESPOND_INSPECT_ACHIEVEMENTS)]
+    internal void HandleRespondInspectAchievements(WorldPacket packet)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+            return;
+
+        RespondInspectAchievements inspect = new();
+        inspect.Player = packet.ReadPackedGuid().To128(GetSession().GameState);
+        inspect.Data = ReadLegacyAchievementData(packet, inspect.Player);
+        SendPacketToClient(inspect);
+    }
+
+    /// <summary>The legacy earned and criteria lists, shared by our own and an inspected player's.</summary>
+    private AllAchievementData ReadLegacyAchievementData(WorldPacket packet, WowGuid128 ownerGuid)
+    {
         uint realmAddress = GetSession().RealmId.GetAddress();
 
         var data = new AllAchievementData();
@@ -68,7 +85,25 @@ public partial class WorldClient
             });
         }
 
-        SendPacketToClient(data);
+        return data;
+    }
+
+    // "<name> has earned the achievement ..." for a realm first.
+    [HandlesSmsg(Opcode.SMSG_SERVER_FIRST_ACHIEVEMENT)]
+    internal void HandleServerFirstAchievement(WorldPacket packet)
+    {
+        var state = GetSession().GameState;
+        BroadcastAchievement broadcast = new();
+        broadcast.Name = packet.ReadCString();
+        broadcast.PlayerGUID = packet.ReadGuid().To128(state);
+        broadcast.AchievementID = packet.ReadUInt32();
+        // 0 means the name may be a guild's: it is, when it is not the player's own name.
+        if (packet.ReadUInt32() == 0)
+        {
+            string playerName = state.GetPlayerName(broadcast.PlayerGUID);
+            broadcast.GuildAchievement = playerName.Length != 0 && playerName != broadcast.Name;
+        }
+        SendPacketToClient(broadcast);
     }
 
     [HandlesSmsg(Opcode.SMSG_CRITERIA_UPDATE)]

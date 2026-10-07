@@ -42,6 +42,24 @@ public partial class WorldClient
     {
     }
 
+    // Vote kick: the modern client has the same vote frame, with VotePassed derived.
+    [HandlesSmsg(Opcode.SMSG_LFG_BOOT_PROPOSAL_UPDATE)]
+    internal void HandleLfgBootProposalUpdate(WorldPacket packet)
+    {
+        LFGBootPlayer boot = new();
+        boot.VoteInProgress = packet.ReadBool();
+        boot.MyVoteCompleted = packet.ReadBool();
+        boot.MyVote = packet.ReadBool();
+        boot.Target = packet.ReadGuid().To128(GetSession().GameState);
+        boot.TotalVotes = packet.ReadUInt32();
+        boot.BootVotes = packet.ReadUInt32();
+        boot.TimeLeft = (int)packet.ReadUInt32();
+        boot.VotesNeeded = packet.ReadUInt32();
+        boot.Reason = packet.ReadCString();
+        boot.VotePassed = !boot.VoteInProgress && boot.BootVotes >= boot.VotesNeeded;
+        SendPacketToClient(boot);
+    }
+
     [HandlesSmsg(Opcode.SMSG_LFG_OFFER_CONTINUE)]
     internal void HandleLFGOfferContinue(WorldPacket packet)
     {

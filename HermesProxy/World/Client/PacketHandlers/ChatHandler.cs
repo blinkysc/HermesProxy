@@ -26,25 +26,12 @@ public partial class WorldClient
             packet.ReadBytes(3);                      // has 3 null bytes before the invalid channel name
 
         string channelName = packet.ReadCString();
+        // Everything but YouJoined/YouLeft, which have their own packets, reaches a V3_4_3 client
+        // as SMSG_CHANNEL_NOTIFY: wrong password, kicks, bans, owner and moderator changes.
+        ChannelNotify notify = new ChannelNotify { Type = type, Channel = channelName };
 
         switch (type)
         {
-            case ChatNotify.PlayerAlreadyMember:
-            case ChatNotify.Invite:
-            case ChatNotify.ModerationOn:
-            case ChatNotify.ModerationOff:
-            case ChatNotify.AnnouncementsOn:
-            case ChatNotify.AnnouncementsOff:
-            case ChatNotify.PasswordChanged:
-            case ChatNotify.OwnerChanged:
-            case ChatNotify.Joined:
-            case ChatNotify.Left:
-            case ChatNotify.VoiceOn:
-            case ChatNotify.VoiceOff:
-            {
-                packet.ReadGuid();
-                break;
-            }
             case ChatNotify.YouJoined:
             {
                 ChannelFlags flags;
@@ -91,33 +78,46 @@ public partial class WorldClient
                     SendPacketToClient(left);
                 break;
             }
+            case ChatNotify.PlayerAlreadyMember:
+            case ChatNotify.Invite:
+            case ChatNotify.ModerationOn:
+            case ChatNotify.ModerationOff:
+            case ChatNotify.AnnouncementsOn:
+            case ChatNotify.AnnouncementsOff:
+            case ChatNotify.PasswordChanged:
+            case ChatNotify.OwnerChanged:
+            case ChatNotify.Joined:
+            case ChatNotify.Left:
+            case ChatNotify.VoiceOn:
+            case ChatNotify.VoiceOff:
+            case ChatNotify.TrialRestricted:
+            {
+                SetChannelNotifySender(notify, packet.ReadGuid().To128(GetSession().GameState));
+                break;
+            }
             case ChatNotify.PlayerNotFound:
             case ChatNotify.ChannelOwner:
             case ChatNotify.PlayerNotBanned:
             case ChatNotify.PlayerInvited:
             case ChatNotify.PlayerInviteBanned:
             {
-                packet.ReadCString(); // Player Name
+                notify.Sender = packet.ReadCString(); // Player Name
                 break;
             }
             case ChatNotify.ModeChange:
             {
-                packet.ReadGuid();
-                packet.ReadUInt8(); // Old ChannelMemberFlag
-                packet.ReadUInt8(); // New ChannelMemberFlag
+                SetChannelNotifySender(notify, packet.ReadGuid().To128(GetSession().GameState));
+                notify.OldFlags = packet.ReadUInt8(); // Old ChannelMemberFlag
+                notify.NewFlags = packet.ReadUInt8(); // New ChannelMemberFlag
                 break;
             }
             case ChatNotify.PlayerKicked:
             case ChatNotify.PlayerBanned:
             case ChatNotify.PlayerUnbanned:
             {
-                packet.ReadGuid(); // Bad
-                packet.ReadGuid(); // Good
-                break;
-            }
-            case ChatNotify.TrialRestricted:
-            {
-                packet.ReadGuid();
+                notify.TargetGuid = packet.ReadGuid().To128(GetSession().GameState); // Bad
+                notify.TargetVirtualRealm = GetSession().RealmId.GetAddress();
+                SetChannelNotifySender(notify, packet.ReadGuid().To128(GetSession().GameState)); // Good
                 break;
             }
             case ChatNotify.WrongPassword:
@@ -135,6 +135,22 @@ public partial class WorldClient
             case ChatNotify.NotInLfg:
                 break;
         }
+
+        if (type is not (ChatNotify.YouJoined or ChatNotify.YouLeft) && ModernVersion.Build == ClientVersionBuild.V3_4_3_54261)
+        {
+            notify.ChatChannelID = GetSession().GameState.ChannelIds.TryGetValue(channelName, out int channelId) ? channelId : 0;
+            SendPacketToClient(notify);
+        }
+    }
+
+    private void SetChannelNotifySender(ChannelNotify notify, WowGuid128 sender)
+    {
+        notify.SenderGuid = sender;
+        if (sender.IsEmpty())
+            return;
+        notify.Sender = GetSession().GameState.GetPlayerName(sender) ?? string.Empty;
+        notify.SenderAccountID = GetSession().GetGameAccountGuidForPlayer(sender);
+        notify.SenderVirtualRealm = GetSession().RealmId.GetAddress();
     }
 
     [HandlesSmsg(Opcode.SMSG_CHANNEL_LIST)]
@@ -572,9 +588,36 @@ public partial class WorldClient
         emote.EmoteID = packet.ReadInt32();
         emote.SoundIndex = packet.ReadInt32();
         uint nameLength = packet.ReadUInt32();
-        string targetName = packet.ReadString(nameLength);
-        emote.TargetGUID = GetSession().GameState.GetPlayerGuidByName(targetName);
+        string targetName = packet.ReadString(nameLength).TrimEnd('\0');
+        var state = GetSession().GameState;
+        emote.TargetGUID = state.GetPlayerGuidByName(targetName);
+        // The legacy packet names the target; a creature has no player-name entry. Our own emote
+        // targeted what CMSG_SEND_TEXT_EMOTE named, anyone else's is found by name in view.
+        if (emote.TargetGUID.IsEmpty() && targetName.Length != 0)
+        {
+            emote.TargetGUID = emote.SourceGUID == state.CurrentPlayerGuid && !state.LastTextEmoteTarget.IsEmpty()
+                ? state.LastTextEmoteTarget
+                : state.FindVisibleCreatureByName(targetName);
+        }
         SendPacketToClient(emote);
+    }
+
+    [HandlesSmsg(Opcode.SMSG_CHAT_PLAYER_AMBIGUOUS)]
+    internal void HandleChatPlayerAmbiguous(WorldPacket packet)
+    {
+        SendPacketToClient(new ChatPlayerAmbiguous { Name = packet.ReadCString() });
+    }
+
+    [HandlesSmsg(Opcode.SMSG_CHAT_RESTRICTED)]
+    internal void HandleChatRestricted(WorldPacket packet)
+    {
+        SendPacketToClient(new ChatRestricted { Restriction = packet.ReadUInt8() });
+    }
+
+    [HandlesSmsg(Opcode.SMSG_CHAT_WRONG_FACTION)]
+    internal void HandleChatWrongFaction(WorldPacket packet)
+    {
+        SendPacketToClient(new ChatPkt(GetSession(), ChatMessageTypeModern.System, "You can't speak to members of the opposing faction."));
     }
 
     [HandlesSmsg(Opcode.SMSG_PRINT_NOTIFICATION)]

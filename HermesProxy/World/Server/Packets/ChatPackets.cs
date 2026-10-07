@@ -249,17 +249,16 @@ public class ChatPkt : ServerPacket, ISpanWritable
         if (language == (uint)Language.Addon)
         {
             language = (uint)Language.AddonBfA;
+            // Split at the first tab only: the message itself may contain tabs.
             char tab = '\t';
-            if (text.Contains(tab))
-            {
-                string[] parts = text.Split(tab);
-                addonPrefix = parts[0];
-                text = string.Join(" ", parts.Skip(1).ToList());
+            int split = text.IndexOf(tab);
+            if (split < 0)
+                return false;
 
-                if (!registeredPrefixes.Contains(addonPrefix))
-                    return false;
-            }
-            else
+            addonPrefix = text.Substring(0, split);
+            text = text.Substring(split + 1);
+
+            if (!registeredPrefixes.Contains(addonPrefix))
                 return false;
         }
         return true;
@@ -685,3 +684,71 @@ class ChatServerMessage : ServerPacket, ISpanWritable
 }
 
 public readonly record struct ChatRegisterAddonPrefixes(List<string> Prefixes);
+
+public class ChannelNotify : ServerPacket
+{
+    public ChatNotify Type;
+    public string Channel = string.Empty;
+    public string Sender = string.Empty;
+    public WowGuid128 SenderGuid;
+    public WowGuid128 SenderAccountID;
+    public uint SenderVirtualRealm;
+    public WowGuid128 TargetGuid;
+    public uint TargetVirtualRealm;
+    public int ChatChannelID;
+    public byte OldFlags;
+    public byte NewFlags;
+
+    public ChannelNotify() : base(Opcode.SMSG_CHANNEL_NOTIFY) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteBits((uint)Type, 6);
+        _worldPacket.WriteBits(Encoding.UTF8.GetByteCount(Channel), 7);
+        _worldPacket.WriteBits(Encoding.UTF8.GetByteCount(Sender), 6);
+        _worldPacket.FlushBits();
+        _worldPacket.WritePackedGuid128(SenderGuid);
+        _worldPacket.WritePackedGuid128(SenderAccountID);
+        _worldPacket.WriteUInt32(SenderVirtualRealm);
+        _worldPacket.WritePackedGuid128(TargetGuid);
+        _worldPacket.WriteUInt32(TargetVirtualRealm);
+        _worldPacket.WriteInt32(ChatChannelID);
+        if (Type == ChatNotify.ModeChange)
+        {
+            _worldPacket.WriteUInt8(OldFlags);
+            _worldPacket.WriteUInt8(NewFlags);
+        }
+        _worldPacket.WriteString(Channel);
+        _worldPacket.WriteString(Sender);
+    }
+}
+
+public class ChatPlayerAmbiguous : ServerPacket
+{
+    public string Name = "";
+
+    public ChatPlayerAmbiguous() : base(Opcode.SMSG_CHAT_PLAYER_AMBIGUOUS) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteBits(Name.GetByteCount(), 9);
+        _worldPacket.FlushBits();
+        _worldPacket.WriteString(Name);
+    }
+}
+
+public class ChatRestricted : ServerPacket
+{
+    public int Restriction;
+
+    public ChatRestricted() : base(Opcode.SMSG_CHAT_RESTRICTED) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(Restriction);
+    }
+}
+
+public readonly record struct ChannelPassword(string ChannelName, string Password);
+
+public readonly record struct ChannelPlayerCommand(string ChannelName, string Name);

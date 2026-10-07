@@ -35,6 +35,22 @@ public static class ItemSystem
     [HandlesCmsg(Opcode.CMSG_BUY_ITEM)]
     public static void HandleBuyItem(in BuyItem item, in SessionContext ctx)
     {
+        // Dragged from the vendor onto a bag slot: 3.x has its own opcode for buying into a slot,
+        // where CMSG_BUY_ITEM puts the item wherever there is room.
+        if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261 && !item.ContainerGUID.IsEmpty()
+            && LegacyVersion.AddedInVersion(ClientVersionBuild.V3_1_0_9767))
+        {
+            WorldPacket inSlot = new WorldPacket(Opcode.CMSG_BUY_ITEM_IN_SLOT);
+            inSlot.WriteGuid(item.VendorGUID.To64());
+            inSlot.WriteUInt32(item.Item.ItemID);
+            inSlot.WriteUInt32(item.MuID); // legacy vendor slot, see below
+            inSlot.WriteGuid(item.ContainerGUID.To64());
+            inSlot.WriteUInt8((byte)item.Slot);
+            inSlot.WriteUInt32(item.Quantity / ctx.GetSession().GameState.GetItemBuyCount(item.Item.ItemID));
+            ctx.SendPacketToServer(inSlot);
+            return;
+        }
+
         WorldPacket packet = new WorldPacket(Opcode.CMSG_BUY_ITEM);
         packet.WriteGuid(item.VendorGUID.To64());
         packet.WriteUInt32(item.Item.ItemID);
@@ -219,10 +235,34 @@ public static class ItemSystem
             packet.WriteGuid(gems.Gems[i].To64());
         ctx.SendPacketToServer(packet);
 
-        // Packet does not exist in old clients.
-        SocketGemsSuccess success = new SocketGemsSuccess();
-        success.ItemGuid = gems.ItemGuid;
-        ctx.SendPacket(success);
+        // Packet does not exist in old clients. A 3.x server answers with SMSG_SOCKET_GEMS_RESULT,
+        // which sends it once the gems are in (WorldClient.HandleSocketGemsResult).
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+        {
+            SocketGemsSuccess success = new SocketGemsSuccess();
+            success.ItemGuid = gems.ItemGuid;
+            ctx.SendPacket(success);
+        }
+    }
+
+    [HandlesCmsg(Opcode.CMSG_GET_ITEM_PURCHASE_DATA)]
+    public static void HandleGetItemPurchaseData(in GetItemPurchaseData request, in SessionContext ctx)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+            return;
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_GET_ITEM_PURCHASE_DATA);
+        packet.WriteGuid(request.ItemGUID.To64());
+        ctx.SendPacketToServer(packet);
+    }
+
+    [HandlesCmsg(Opcode.CMSG_ITEM_PURCHASE_REFUND)]
+    public static void HandleItemPurchaseRefund(in ItemPurchaseRefund request, in SessionContext ctx)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+            return;
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_ITEM_PURCHASE_REFUND);
+        packet.WriteGuid(request.ItemGUID.To64());
+        ctx.SendPacketToServer(packet);
     }
 
     [HandlesCmsg(Opcode.CMSG_OPEN_ITEM)]

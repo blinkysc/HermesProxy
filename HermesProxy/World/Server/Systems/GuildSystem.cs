@@ -75,6 +75,13 @@ public static class GuildSystem
     /// <c>WorldClient.HandleGuildRoster</c> sends them on as SMSG_GUILD_RANKS. Only the player's
     /// own guild can be asked for, so the GUID is not needed.
     /// </remarks>
+    [HandlesCmsg(Opcode.CMSG_GUILD_EVENT_LOG_QUERY)]
+    public static void HandleGuildEventLogQuery(in EmptyClientPacket query, in SessionContext ctx)
+    {
+        if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
+            ctx.SendPacketToServer(new WorldPacket(Opcode.MSG_GUILD_EVENT_LOG_QUERY));
+    }
+
     [HandlesCmsg(Opcode.CMSG_GUILD_GET_RANKS)]
     public static void HandleGuildGetRanks(in GuildGetRanks query, in SessionContext ctx)
     {
@@ -213,6 +220,17 @@ public static class GuildSystem
     [HandlesCmsg(Opcode.CMSG_GUILD_DELETE_RANK)]
     public static void HandleGuildDeleteRank(in GuildDeleteRank rank, in SessionContext ctx)
     {
+        // The legacy opcode has no rank: the server always deletes the lowest one. Deleting any
+        // other from the modern UI would remove the wrong rank.
+        var session = ctx.GetSession();
+        uint guildId = session.GameState.GetPlayerGuildId(session.GameState.CurrentPlayerGuid);
+        if (session.GuildRanks.TryGetValue(guildId, out var ranks) && ranks.Count > 0
+            && rank.RankOrder != ranks.Count - 1)
+        {
+            ctx.SendPacketToClient(new PrintNotification { NotifyText = "Only the lowest guild rank can be deleted on this server." });
+            return;
+        }
+
         WorldPacket packet = new WorldPacket(Opcode.CMSG_GUILD_DELETE_RANK);
         ctx.SendPacketToServer(packet);
     }
@@ -292,7 +310,7 @@ public static class GuildSystem
         updateData.EnsurePlayerData().PlayerFlags = (uint) flags;
         UpdateObject updatePacket = new UpdateObject(ctx.GetSession().GameState);
         updatePacket.ObjectUpdates.Add(updateData);
-        ctx.GetSession().WorldClient!.SendPacketToClient(updatePacket);
+        ctx.GetSession().WorldClient!.SendPlayerValuesUpdate(updatePacket);
     }
 
     [HandlesCmsg(Opcode.CMSG_GUILD_AUTO_DECLINE_INVITATION)]
@@ -466,11 +484,19 @@ public static class GuildSystem
         packet.WriteUInt32(0); // item id
         packet.WriteBool(true); // auto store
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+        {
+            // 3.x: count, then a byte and a uint32 the server skips. The pre-3.x layout below
+            // was two bytes short, so the server read past the packet and moved nothing.
             packet.WriteUInt32(0); // auto store count
+            packet.WriteUInt8(0);
+            packet.WriteUInt32(0);
+        }
         else
+        {
             packet.WriteUInt8(0); // auto store count
-        packet.WriteBool(true); // to char
-        packet.WriteUInt8(0); // unknown
+            packet.WriteBool(true); // to char
+            packet.WriteUInt8(0); // unknown
+        }
         ctx.SendPacketToServer(packet);
     }
 

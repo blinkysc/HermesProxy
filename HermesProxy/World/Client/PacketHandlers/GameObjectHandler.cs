@@ -11,6 +11,15 @@ namespace HermesProxy.World.Client;
 public partial class WorldClient
 {
     // Handlers for SMSG opcodes coming the legacy world server
+    // A book or plaque was used: the client opens its page text.
+    [HandlesSmsg(Opcode.SMSG_PAGE_TEXT)]
+    internal void HandlePageText(WorldPacket packet)
+    {
+        PageTextPkt page = new();
+        page.GameObjectGUID = packet.ReadGuid().To128(GetSession().GameState);
+        SendPacketToClient(page);
+    }
+
     [HandlesSmsg(Opcode.SMSG_GAME_OBJECT_DESPAWN)]
     internal void HandleGameObjectDespawn(WorldPacket packet)
     {

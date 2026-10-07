@@ -1194,3 +1194,45 @@ class QuestPushResult : ServerPacket, ISpanWritable
 }
 
 public readonly record struct QuestPushResultResponse(WowGuid128 SenderGUID, uint QuestID, QuestPushReason Result);
+
+public readonly record struct QueryQuestCompletionNPCs(int[] QuestIDs);
+
+public class QuestCompletionNPCResponse : ServerPacket
+{
+    public List<(int QuestID, int[] NPCs)> Quests = new();
+
+    public QuestCompletionNPCResponse() : base(Opcode.SMSG_QUEST_COMPLETION_NPC_RESPONSE, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(Quests.Count);
+        foreach (var (questId, npcs) in Quests)
+        {
+            _worldPacket.WriteInt32(questId);
+            _worldPacket.WriteInt32(npcs.Length);
+            foreach (int npc in npcs)
+                _worldPacket.WriteInt32(npc);
+        }
+    }
+}
+
+class QuestLogFull : ServerPacket
+{
+    public QuestLogFull() : base(Opcode.SMSG_QUEST_LOG_FULL) { }
+
+    public override void Write() { }
+}
+
+class QuestUpdateAddPvPCredit : ServerPacket
+{
+    public int QuestID;
+    public ushort Count;
+
+    public QuestUpdateAddPvPCredit() : base(Opcode.SMSG_QUEST_UPDATE_ADD_PVP_CREDIT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(QuestID);
+        _worldPacket.WriteUInt16(Count);
+    }
+}

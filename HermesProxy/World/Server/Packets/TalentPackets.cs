@@ -157,3 +157,5 @@ public sealed class TalentInfoCache
         return packet;
     }
 }
+
+public readonly record struct LearnPreviewTalents(int TabIndex, List<(uint TalentID, uint Rank)> Talents);

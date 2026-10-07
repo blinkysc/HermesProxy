@@ -1023,13 +1023,78 @@ public partial class ObjectUpdateBuilder
         data.WriteInt32((int?)src.PvPLastWeeksTierMaxFromWins ?? -1);
     }
 
-    // Heirlooms.Resize + HeirloomFlags.Resize. We ship the full owned set so the
+    // Heirlooms.Resize + HeirloomFlags.Resize: the heirlooms the account has collected, so the
     // Collections panel renders X/38; the count is session data, not ActivePlayerData.
     internal void WriteCreateActivePlayerHeirloomCounts(WorldPacket data, ActivePlayerData src)
     {
-        uint heirloomCount = (uint)GameData.Heirlooms.Count;
+        uint heirloomCount = (uint)_gameState.GetCollectedHeirloomsOrdered().Length;
         data.WriteUInt32(heirloomCount);
         data.WriteUInt32(heirloomCount);
+    }
+
+    // bit 616 (parent 615): NoReagentCostMask[4].
+    internal void WriteCreateActivePlayerNoReagentCostMask(WorldPacket data, ActivePlayerData src)
+    {
+        for (int i = 0; i < 4; i++)
+            data.WriteUInt32(src.NoReagentCostMask[i] ?? 0);
+    }
+
+    // Resize prefixes: ResearchSites, ResearchSiteProgress, Research, DailyQuestsCompleted,
+    // AvailableQuestLineXQuestIDs, Field_1000. Only the dailies are filled; their payload
+    // follows the titles in WriteCreateActivePlayerDynamicPayloads.
+    internal void WriteCreateActivePlayerResearchAndQuestResizePrefixes(WorldPacket data, ActivePlayerData src)
+    {
+        for (int i = 0; i < 3; i++)
+            data.WriteUInt32(0u);
+        data.WriteUInt32((uint)(_gameState.DailyQuestsDone?.Count ?? 0));
+        data.WriteUInt32(0u);
+        data.WriteUInt32(0u);
+    }
+
+    // DailyQuestsCompleted, in daily-slot order. The client greys out today's dailies from it.
+    private void WriteDailyQuestsCompleted(WorldPacket data)
+    {
+        foreach (uint questId in GetDailyQuestsOrdered())
+            data.WriteInt32((int)questId);
+    }
+
+    private uint[] GetDailyQuestsOrdered()
+    {
+        var done = _gameState.DailyQuestsDone;
+        if (done == null || done.Count == 0)
+            return [];
+        var slots = new uint[done.Count];
+        done.Keys.CopyTo(slots, 0);
+        Array.Sort(slots);
+        for (int i = 0; i < slots.Length; i++)
+            slots[i] = done[slots[i]];
+        return slots;
+    }
+
+    internal static int GetSelfResSpellCount(ActivePlayerData src)
+    {
+        int count = 0;
+        if (src.SelfResSpells != null)
+        {
+            foreach (uint spellId in src.SelfResSpells)
+            {
+                if (spellId != 0)
+                    count++;
+            }
+        }
+        return count;
+    }
+
+    // SelfResSpells (Soulstone, Reincarnation): what lights the "use Soulstone" button on death.
+    private void WriteSelfResSpells(WorldPacket data, ActivePlayerData src)
+    {
+        if (src.SelfResSpells == null)
+            return;
+        foreach (uint spellId in src.SelfResSpells)
+        {
+            if (spellId != 0)
+                data.WriteInt32((int)spellId);
+        }
     }
 
     // bit 1512 GlyphsGroup + bit 120 GlyphsEnabled. Sources from _gameState rather than
@@ -1062,29 +1127,37 @@ public partial class ObjectUpdateBuilder
     }
 
     // Dynamic-field payloads, in WPP wire order: KnownTitles (folded to 64-bit words),
-    // then Heirlooms[Count], HeirloomFlags[Count], then Toys[Count]. Counts were
-    // written earlier by the resize prefixes, so payload length has to agree with them.
+    // DailyQuestsCompleted, Heirlooms[Count], HeirloomFlags[Count], Toys[Count], then
+    // SelfResSpells. Counts were written earlier by the resize prefixes, so payload length has
+    // to agree with them.
     internal void WriteCreateActivePlayerDynamicPayloads(WorldPacket data, ActivePlayerData src)
     {
         Span<ulong> foldedTitles = stackalloc ulong[6];
         int knownTitlesCount = FoldKnownTitles(src.KnownTitles, foldedTitles);
         for (int i = 0; i < knownTitlesCount; i++)
             data.WriteUInt64(foldedTitles[i]);
-        foreach (var itemId in GameData.Heirlooms)
+        WriteDailyQuestsCompleted(data);
+        var heirlooms = _gameState.GetCollectedHeirloomsOrdered();
+        foreach (var itemId in heirlooms)
             data.WriteInt32(itemId);
-        for (int i = 0; i < GameData.Heirlooms.Count; i++)
+        for (int i = 0; i < heirlooms.Length; i++)
             data.WriteUInt32(0u);
         var usableToys = _gameState.GetUsableToysOrdered();
         for (int i = 0; i < usableToys.Length; i++)
             data.WriteInt32((int)usableToys[i]);
+        WriteSelfResSpells(data, src);
     }
 
-    // Toys.Resize + the seven empty prefixes after it (Transmog through TaskQuests).
-    // Missing LearnedToys still writes Resize 0 so the later payload length stays valid.
+    // Toys.Resize + the seven prefixes after it (Transmog through TaskQuests); the third of them
+    // is SelfResSpells. Missing LearnedToys still writes Resize 0 so the later payload length
+    // stays valid.
     internal void WriteCreateActivePlayerToyResizePrefixes(WorldPacket data, ActivePlayerData src)
     {
         data.WriteUInt32((uint)_gameState.GetUsableToysOrdered().Length);
-        for (int i = 0; i < 7; i++)
+        data.WriteUInt32(0u);
+        data.WriteUInt32(0u);
+        data.WriteUInt32((uint)GetSelfResSpellCount(src));
+        for (int i = 0; i < 4; i++)
             data.WriteUInt32(0u);
     }
 
@@ -1308,6 +1381,61 @@ public partial class ObjectUpdateBuilder
         foreach (int itemId in src.Toys)
             data.WriteInt32(itemId);
     }
+
+    // DailyQuestsCompleted (bit 4): the whole list, rewritten whenever a daily slot changes.
+    internal void WriteUpdateActivePlayerDailyQuestsPreamble(WorldPacket data, ref Framework.Util.StackBitMask blocks, ActivePlayerData src)
+    {
+        int count = _gameState.DailyQuestsDone?.Count ?? 0;
+        data.WriteBits((uint)count, 32);
+        for (int i = 0; i < count; i++)
+            data.WriteBit(true);
+    }
+
+    internal void WriteUpdateActivePlayerDailyQuestsBody(WorldPacket data, ActivePlayerData src) => WriteDailyQuestsCompleted(data);
+
+    // Heirlooms (bit 7) and HeirloomFlags (bit 8), sent whole by CollectionSync.RefreshHeirlooms.
+    internal void WriteUpdateActivePlayerHeirloomsPreamble(WorldPacket data, ref Framework.Util.StackBitMask blocks, ActivePlayerData src)
+    {
+        int count = src.Heirlooms?.Count ?? 0;
+        data.WriteBits((uint)count, 32);
+        for (int i = 0; i < count; i++)
+            data.WriteBit(true);
+    }
+
+    internal void WriteUpdateActivePlayerHeirloomsBody(WorldPacket data, ActivePlayerData src)
+    {
+        if (src.Heirlooms == null)
+            return;
+        foreach (int itemId in src.Heirlooms)
+            data.WriteInt32(itemId);
+    }
+
+    internal void WriteUpdateActivePlayerHeirloomFlagsPreamble(WorldPacket data, ref Framework.Util.StackBitMask blocks, ActivePlayerData src)
+    {
+        int count = src.HeirloomFlags?.Count ?? 0;
+        data.WriteBits((uint)count, 32);
+        for (int i = 0; i < count; i++)
+            data.WriteBit(true);
+    }
+
+    internal void WriteUpdateActivePlayerHeirloomFlagsBody(WorldPacket data, ActivePlayerData src)
+    {
+        if (src.HeirloomFlags == null)
+            return;
+        foreach (uint flags in src.HeirloomFlags)
+            data.WriteUInt32(flags);
+    }
+
+    // SelfResSpells (bit 12).
+    internal void WriteUpdateActivePlayerSelfResSpellsPreamble(WorldPacket data, ref Framework.Util.StackBitMask blocks, ActivePlayerData src)
+    {
+        int count = GetSelfResSpellCount(src);
+        data.WriteBits((uint)count, 32);
+        for (int i = 0; i < count; i++)
+            data.WriteBit(true);
+    }
+
+    internal void WriteUpdateActivePlayerSelfResSpellsBody(WorldPacket data, ActivePlayerData src) => WriteSelfResSpells(data, src);
 
     // Skill (bit 32) — nested SkillInfo write via existing WriteUpdateSkillInfo helper.
     internal void WriteUpdateActivePlayerSkill(WorldPacket data, ActivePlayerData src)

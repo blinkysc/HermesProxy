@@ -2757,3 +2757,176 @@ class DispelFailed : ServerPacket, ISpanWritable
     public uint SpellID;
     public List<int> FailedSpells = new();
 }
+
+class ConvertRune : ServerPacket
+{
+    public RuneData Runes = new RuneData();
+    public uint Index;
+    public uint Rune;
+
+    public ConvertRune() : base(Opcode.SMSG_CONVERT_RUNE, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        Runes.Write(_worldPacket);
+        _worldPacket.WriteUInt32(Index);
+        _worldPacket.WriteUInt32(Rune);
+    }
+}
+
+class ModifyCooldown : ServerPacket
+{
+    public int SpellID;
+    public int DeltaTime;
+    public bool IsPet;
+    public bool WithoutCategoryCooldown;
+
+    public ModifyCooldown() : base(Opcode.SMSG_MODIFY_COOLDOWN, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(SpellID);
+        _worldPacket.WriteInt32(DeltaTime);
+        _worldPacket.WriteBit(IsPet);
+        _worldPacket.WriteBit(WithoutCategoryCooldown);
+        _worldPacket.FlushBits();
+    }
+}
+
+public class SpellInterruptLog : ServerPacket
+{
+    public WowGuid128 Caster;
+    public WowGuid128 Victim;
+    public int InterruptedSpellID;
+    public int SpellID;
+
+    public SpellInterruptLog() : base(Opcode.SMSG_SPELL_INTERRUPT_LOG, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(Caster);
+        _worldPacket.WritePackedGuid128(Victim);
+        _worldPacket.WriteInt32(InterruptedSpellID);
+        _worldPacket.WriteInt32(SpellID);
+    }
+}
+
+public class SpellOrDamageImmune : ServerPacket
+{
+    public WowGuid128 CasterGUID;
+    public WowGuid128 VictimGUID;
+    public int SpellID;
+    public bool IsPeriodic;
+
+    public SpellOrDamageImmune() : base(Opcode.SMSG_SPELL_OR_DAMAGE_IMMUNE, ConnectionType.Instance) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(CasterGUID);
+        _worldPacket.WritePackedGuid128(VictimGUID);
+        _worldPacket.WriteInt32(SpellID);
+        _worldPacket.WriteBit(IsPeriodic);
+        _worldPacket.FlushBits();
+    }
+}
+
+public readonly record struct UpdateMissileTrajectory(WowGuid128 Guid, int SpellID, float Pitch, float Speed, Vector3 FirePos, Vector3 ImpactPos);
+
+class MirrorImageComponentedData : ServerPacket
+{
+    public WowGuid128 UnitGUID;
+    public int DisplayID;
+    public byte RaceID;
+    public byte Gender;
+    public byte ClassID;
+    public List<ChrCustomizationChoice> Customizations = new List<ChrCustomizationChoice>();
+    public WowGuid128 GuildGUID;
+    public List<int> ItemDisplayIDs = new List<int>();
+
+    public MirrorImageComponentedData() : base(Opcode.SMSG_MIRROR_IMAGE_COMPONENTED_DATA) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(UnitGUID);
+        _worldPacket.WriteInt32(DisplayID);
+        _worldPacket.WriteUInt8(RaceID);
+        _worldPacket.WriteUInt8(Gender);
+        _worldPacket.WriteUInt8(ClassID);
+        _worldPacket.WriteUInt32((uint)Customizations.Count);
+        _worldPacket.WritePackedGuid128(GuildGUID);
+        _worldPacket.WriteInt32(ItemDisplayIDs.Count);
+        foreach (ChrCustomizationChoice customization in Customizations)
+        {
+            customization.WriteCreate(_worldPacket);
+        }
+        foreach (int itemDisplayID in ItemDisplayIDs)
+        {
+            _worldPacket.WriteInt32(itemDisplayID);
+        }
+    }
+}
+
+class MirrorImageCreatureData : ServerPacket
+{
+    public WowGuid128 UnitGUID;
+    public int DisplayID;
+
+    public MirrorImageCreatureData() : base(Opcode.SMSG_MIRROR_IMAGE_CREATURE_DATA) { }
+
+    public override void Write()
+    {
+        _worldPacket.WritePackedGuid128(UnitGUID);
+        _worldPacket.WriteInt32(DisplayID);
+        _worldPacket.WriteInt32(0);
+    }
+}
+
+public readonly record struct GetMirrorImageData(WowGuid128 UnitGUID, int DisplayID);
+
+public class PetActionFeedbackPkt : ServerPacket
+{
+    public int SpellID;
+    public byte Response;
+
+    public PetActionFeedbackPkt() : base(Opcode.SMSG_PET_ACTION_FEEDBACK) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(SpellID);
+        _worldPacket.WriteUInt8(Response);
+    }
+}
+
+public class PetNameInvalid : ServerPacket
+{
+    public byte Result;
+    public WowGuid128 PetGUID;
+    public int PetNumber;
+    public string NewName = "";
+    public string[]? DeclinedNames;
+
+    public PetNameInvalid() : base(Opcode.SMSG_PET_NAME_INVALID) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt8(Result);
+        _worldPacket.WritePackedGuid128(PetGUID);
+        _worldPacket.WriteInt32(PetNumber);
+        _worldPacket.WriteBits(NewName.GetByteCount(), 8);
+        _worldPacket.WriteBit(DeclinedNames != null);
+        if (DeclinedNames != null)
+        {
+            foreach (string declined in DeclinedNames)
+                _worldPacket.WriteBits(declined.GetByteCount(), 7);
+        }
+        _worldPacket.FlushBits();
+        if (DeclinedNames != null)
+        {
+            foreach (string declined in DeclinedNames)
+                _worldPacket.WriteString(declined);
+        }
+        _worldPacket.WriteString(NewName);
+    }
+}
+
+public readonly record struct PetSpellAutocast(WowGuid128 PetGUID, uint SpellID, bool AutocastEnabled);

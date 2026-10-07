@@ -271,3 +271,49 @@ public static class SetPlayerDeclinedNamesCodec
         packet = new SetPlayerDeclinedNames(player, names);
     }
 }
+
+public static class CharCustomizeCodec
+{
+    public static void Read(ref SpanPacketReader r, out CharCustomize packet)
+    {
+        WowGuid128 charGuid = r.ReadPackedGuid128();
+        Gender sexId = (Gender)r.ReadUInt8();
+        uint customizationCount = r.ReadUInt32();
+        var customizations = new List<ChrCustomizationChoice>(8);
+        for (int i = 0; i < customizationCount; i++)
+        {
+            uint optionId = r.ReadUInt32();
+            uint choiceId = r.ReadUInt32();
+            customizations.Add(new ChrCustomizationChoice(optionId, choiceId));
+        }
+        r.ResetBitPos();
+        uint nameLength = r.ReadBits<uint>(6);
+        string charName = r.ReadString(nameLength);
+        customizations.Sort();
+        packet = new CharCustomize(charGuid, sexId, charName, customizations);
+    }
+}
+
+public static class CharRaceOrFactionChangeCodec
+{
+    public static void Read(ref SpanPacketReader r, out CharRaceOrFactionChange packet)
+    {
+        bool factionChange = r.HasBit();
+        uint nameLength = r.ReadBits<uint>(6);
+        WowGuid128 guid = r.ReadPackedGuid128();
+        Gender sexId = (Gender)r.ReadUInt8();
+        Race raceId = (Race)r.ReadUInt8();
+        Race initialRaceId = (Race)r.ReadUInt8();
+        uint customizationCount = r.ReadUInt32();
+        string name = r.ReadString(nameLength);
+        var customizations = new List<ChrCustomizationChoice>(8);
+        for (int i = 0; i < customizationCount; i++)
+        {
+            uint optionId = r.ReadUInt32();
+            uint choiceId = r.ReadUInt32();
+            customizations.Add(new ChrCustomizationChoice(optionId, choiceId));
+        }
+        customizations.Sort();
+        packet = new CharRaceOrFactionChange(factionChange, guid, sexId, raceId, initialRaceId, name, customizations);
+    }
+}

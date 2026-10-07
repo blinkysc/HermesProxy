@@ -5,6 +5,7 @@ using HermesProxy.World.Objects;
 using HermesProxy.World.Server.Packets;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace HermesProxy.World.Client;
 
@@ -162,7 +163,25 @@ public partial class WorldClient
         arena.PlayerName = packet.ReadCString();
         var errorType = (ArenaTeamCommandErrorLegacy)packet.ReadUInt32();
         arena.Error = errorType.CastEnum<ArenaTeamCommandErrorModern>();
+
+        // An invite the proxy sent itself may hit a player already in the team; that is not the
+        // player's own failure to report.
+        if (arena.Action == ArenaTeamCommandType.Invite
+            && errorType == ArenaTeamCommandErrorLegacy.AlreadyInArenaTeamS
+            && GetSession().GameState.InjectedArenaInvites.Any(i => i.EndsWith(":" + arena.PlayerName, StringComparison.OrdinalIgnoreCase)))
+            return;
+
         SendPacketToClient(arena);
+    }
+
+    // ERR_ARENA_NO_TEAM_II: the bracket the player tried to queue for has no team of theirs.
+    [HandlesSmsg(Opcode.SMSG_ARENA_ERROR)]
+    internal void HandleArenaError(WorldPacket packet)
+    {
+        if (packet.ReadUInt32() != 0)
+            return;
+        byte teamSize = packet.ReadUInt8();
+        SendPacketToClient(new ChatPkt(GetSession(), ChatMessageTypeModern.System, $"You are not in a {teamSize}v{teamSize} arena team."));
     }
 
     [HandlesSmsg(Opcode.SMSG_ARENA_TEAM_INVITE)]

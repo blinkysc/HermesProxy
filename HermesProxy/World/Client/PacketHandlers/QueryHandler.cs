@@ -24,7 +24,18 @@ public partial class WorldClient
         response.CurrentTime = packet.ReadInt32();
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180) && packet.CanRead())
             packet.ReadInt32(); // Next Daily Quest Reset Time
-        SendPacketToClient(response);
+
+        var session = GetSession();
+        session.LegacyServerTimeOffset = response.CurrentTime - Time.UnixTime;
+        // Asked for by WorldSocket.SendServerTimeOffset rather than by the client's own query.
+        var requester = session.ServerTimeOffsetRequester;
+        if (requester != null)
+        {
+            session.ServerTimeOffsetRequester = null;
+            requester.SendServerTimeOffset(response.CurrentTime);
+        }
+        else
+            SendPacketToClient(response);
     }
     [HandlesSmsg(Opcode.SMSG_QUERY_QUEST_INFO_RESPONSE)]
     internal void HandleQueryQuestInfoResponse(WorldPacket packet)
@@ -70,8 +81,9 @@ public partial class WorldClient
             {
                 QuestObjective objective = new QuestObjective();
                 objective.QuestID = response.QuestID;
-                objective.Id = QuestObjective.QuestObjectiveCounter++;
-                objective.StorageIndex = objectiveCounter++;
+                objective.Id = QuestObjective.StableId(response.QuestID, QuestObjective.SlotReputation + i);
+                // No progress counter: the client checks reputation itself.
+                objective.StorageIndex = -1;
                 objective.Type = QuestObjectiveType.MinReputation;
                 objective.ObjectID = factionId;
                 objective.Amount = factionValue;
@@ -91,8 +103,9 @@ public partial class WorldClient
         {
             QuestObjective objective = new QuestObjective();
             objective.QuestID = response.QuestID;
-            objective.Id = QuestObjective.QuestObjectiveCounter++;
-            objective.StorageIndex = objectiveCounter++;
+            objective.Id = QuestObjective.StableId(response.QuestID, QuestObjective.SlotMoney);
+            // No progress counter: the client checks money itself.
+            objective.StorageIndex = -1;
             objective.Type = QuestObjectiveType.Money;
             objective.ObjectID = 0;
             objective.Amount = -rewOrReqMoney;
@@ -123,8 +136,8 @@ public partial class WorldClient
             {
                 QuestObjective objective = new QuestObjective();
                 objective.QuestID = response.QuestID;
-                objective.Id = QuestObjective.QuestObjectiveCounter++;
-                objective.StorageIndex = objectiveCounter++;
+                objective.Id = QuestObjective.StableId(response.QuestID, QuestObjective.SlotPlayerKills);
+                objective.StorageIndex = 0;
                 objective.Type = QuestObjectiveType.PlayerKills;
                 objective.ObjectID = 0;
                 objective.Amount = requiredPlayerKills;
@@ -203,7 +216,7 @@ public partial class WorldClient
             {
                 QuestObjective objective = new QuestObjective();
                 objective.QuestID = response.QuestID;
-                objective.Id = QuestObjective.QuestObjectiveCounter++;
+                objective.Id = QuestObjective.StableId(response.QuestID, i);
                 // Legacy server stores the kill counter at the ReqCreatureOrGOIdN column index
                 // (vanilla 6-bit, TBC 8-bit, WotLK 16-bit slot in PLAYER_QUEST_LOG_*_2).
                 // Modern client reads ObjectiveProgress[StorageIndex], so a compacted index
@@ -246,7 +259,7 @@ public partial class WorldClient
             {
                 QuestObjective objective = new QuestObjective();
                 objective.QuestID = response.QuestID;
-                objective.Id = QuestObjective.QuestObjectiveCounter++;
+                objective.Id = QuestObjective.StableId(response.QuestID, 4 + i);
                 objective.StorageIndex = objectiveCounter++;
                 // Legacy POI blobs address required items as column 4+N, never the
                 // compacted StorageIndex, so keep the raw column for the POI binder.
@@ -258,11 +271,17 @@ public partial class WorldClient
             }
         }
 
+        // The four texts follow the legacy columns: creature/GO N, or else required item N.
+        // Matching by position mislabelled every quest with a reputation, money or gap objective.
         for (int i = 0; i < 4; i++)
         {
             string objectiveText = packet.ReadCString();
-            if (quest.Objectives.Count > i)
-                quest.Objectives[i].Description = objectiveText;
+            int column = i;
+            var objective = quest.Objectives.Find(o => o.LegacyPoiIndex == column
+                                                       && o.Type is QuestObjectiveType.Monster or QuestObjectiveType.GameObject)
+                         ?? quest.Objectives.Find(o => o.LegacyPoiIndex == 4 + column && o.Type == QuestObjectiveType.Item);
+            if (objective != null)
+                objective.Description = objectiveText;
         }
 
         // Placeholders
@@ -568,6 +587,7 @@ public partial class WorldClient
 
         SendItemUpdatesIfNeeded(item);
         GameData.StoreItemTemplate((uint)entry.Key, item);
+        ItemTemplateCache.Remember(item);
 
         // issue #34: any UpdateObject batch that was held back waiting on this
         // item template's hotfix can be released now that the DB2 row is in

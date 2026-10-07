@@ -78,3 +78,11 @@ public static class BattlefieldPortCodec
         packet = new BattlefieldPort(ticket, r.HasBit());
     }
 }
+
+public static class ReportPvPPlayerAFKCodec
+{
+    public static void Read(ref SpanPacketReader r, out ReportPvPPlayerAFK packet)
+    {
+        packet = new ReportPvPPlayerAFK(r.ReadPackedGuid128());
+    }
+}

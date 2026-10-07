@@ -582,6 +582,8 @@ public partial class WorldSocket : SocketBase, BnetServices.INetwork
     private static readonly Microsoft.Extensions.Logging.ILogger _melNoPlayerYet =
         Log.CreateMelLogger(Log.CategoryServer);
 
+    private static readonly string HostTimeZoneId = GetHostIanaTimeZoneId();
+
     /// <summary>
     /// Records a packet written to the client while it has no player object. Diagnostic only:
     /// Trace-gated, so the guid test and the opcode name cost nothing unless Verbose is on.
@@ -1123,7 +1125,7 @@ public partial class WorldSocket : SocketBase, BnetServices.INetwork
             SendAuthResponse(BattlenetRpcErrorCode.Ok, worldClient.GetQueuePosition());
             SendSetTimeZoneInformation();
             SendFeatureSystemStatusGlueScreen();
-            SendClientCacheVersion(0);
+            SendClientCacheVersion(GetSession().LegacyCacheVersion);
             SendAvailableHotfixes();
             SendBnetConnectionState(1);
             GetSession().AccountDataMgr = new AccountDataManager(GetSession().Username, GetSession().RealmManager.GetRealm(_realmId)!.Name);
@@ -1278,7 +1280,9 @@ public partial class WorldSocket : SocketBase, BnetServices.INetwork
             // ActiveExpansionLevel=2, AccountExpansionLevel=0, MinActiveExpansionLevel=2.
             // The level-55-on-account requirement is enforced separately via
             // EnumCharactersResult.MaxCharacterLevel (already populated correctly).
-            if (ModernVersion.ExpansionVersion >= 3 && LegacyVersion.ExpansionVersion >= 3)
+            // Only when the legacy account has WotLK enabled (SMSG_AUTH_RESPONSE expansion 2).
+            if (ModernVersion.ExpansionVersion >= 3 && LegacyVersion.ExpansionVersion >= 3
+                && GetSession().GameState.LegacyAccountExpansion >= 2)
             {
                 foreach (var r in availableRaces)
                     r.Classes.Add(new ClassAvailability(6, 2, 0) { MinActiveExpansionLevel = 2 });
@@ -1317,10 +1321,11 @@ public partial class WorldSocket : SocketBase, BnetServices.INetwork
     // RealmSocket directly and throwing when it is null (change realm).
     internal static SetTimeZoneInformation BuildSetTimeZoneInformation()
     {
-        // @todo: replace dummy values
+        // The host's zone: the proxy runs where the player is, and the legacy server's own zone
+        // is not on the wire.
         SetTimeZoneInformation packet = new();
-        packet.ServerTimeTZ = "Europe/Paris";
-        packet.GameTimeTZ = "Europe/Paris";
+        packet.ServerTimeTZ = HostTimeZoneId;
+        packet.GameTimeTZ = HostTimeZoneId;
 
         return packet;
     }
@@ -1465,11 +1470,44 @@ public partial class WorldSocket : SocketBase, BnetServices.INetwork
         SendPacket(bnetConnected);
     }
 
+    /// <summary>
+    /// Answers with the legacy server's clock. The first request asks the server
+    /// (CMSG_QUERY_TIME) and is answered from WorldClient.HandleQueryTimeResponse, which records
+    /// the offset for the rest of the session.
+    /// </summary>
     public void SendServerTimeOffset()
     {
+        var session = _globalSession;
+        if (session != null && !session.LegacyServerTimeOffset.HasValue)
+        {
+            var worldClient = session.WorldClient;
+            if (worldClient != null && worldClient.IsConnected())
+            {
+                session.ServerTimeOffsetRequester = this;
+                worldClient.SendPacketToServer(new WorldPacket(Opcode.CMSG_QUERY_TIME));
+                return;
+            }
+        }
+        SendServerTimeOffset(Time.UnixTime + (session?.LegacyServerTimeOffset ?? 0));
+    }
+
+    public void SendServerTimeOffset(long serverTime)
+    {
         ServerTimeOffset response = new();
-        response.Time = Time.UnixTime;
+        response.Time = serverTime;
         SendPacket(response);
+    }
+
+    /// <summary>The host's IANA time zone id, or Etc/UTC when it has none the client would accept.</summary>
+    internal static string GetHostIanaTimeZoneId()
+    {
+        string id = TimeZoneInfo.Local.Id;
+        if (TimeZoneInfo.TryConvertWindowsIdToIanaId(id, out string? ianaId))
+            id = ianaId;
+        // SMSG_SET_TIME_ZONE_INFORMATION sends it in 7 bits of length; "Local" and the like are no zone.
+        if (!id.Contains('/') || id.Length >= 64)
+            return "Etc/UTC";
+        return id;
     }
 
     void HandlePing(Ping ping)
@@ -1493,7 +1531,7 @@ public partial class WorldSocket : SocketBase, BnetServices.INetwork
         int count = ModernVersion.GetAccountDataCount();
         accountData.AccountTimes = new long[count];
         for (int i = 0; i < count; i++)
-            accountData.AccountTimes[i] = session.AccountDataMgr.Data[i] != null ? session.AccountDataMgr.Data[i].Timestamp : 0;
+            accountData.AccountTimes[i] = session.AccountDataMgr.GetEffectiveTime((uint)i);
 
         // Do NOT bump the type-0 timestamp to force a re-request. That was added to
         // deliver synthesised bottomLeftActionBar / rightActionBar CVars, but this

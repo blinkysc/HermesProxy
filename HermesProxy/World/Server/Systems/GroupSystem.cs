@@ -32,6 +32,19 @@ namespace HermesProxy.World.Server.Systems;
 /// </remarks>
 public static class GroupSystem
 {
+    // Main tank / main assist.
+    [HandlesCmsg(Opcode.CMSG_SET_PARTY_ASSIGNMENT)]
+    public static void HandleSetPartyAssignment(in SetPartyAssignment assignment, in SessionContext ctx)
+    {
+        if (!LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
+            return;
+        WorldPacket packet = new WorldPacket(Opcode.MSG_PARTY_ASSIGNMENT);
+        packet.WriteUInt8(assignment.Assignment);
+        packet.WriteBool(assignment.Set);
+        packet.WriteGuid(assignment.Target.To64());
+        ctx.SendPacketToServer(packet);
+    }
+
     [HandlesCmsg(Opcode.CMSG_PARTY_INVITE)]
     public static void HandlePartyInvite(in PartyInviteClient invite, in SessionContext ctx)
     {
