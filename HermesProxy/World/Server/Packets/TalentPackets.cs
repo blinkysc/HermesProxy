@@ -158,4 +158,4 @@ public sealed class TalentInfoCache
     }
 }
 
-public readonly record struct LearnPreviewTalents(int TabIndex, List<(uint TalentID, uint Rank)> Talents);
+public readonly record struct LearnPreviewTalents(List<(uint TalentID, uint Rank)> Talents);
