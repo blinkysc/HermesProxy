@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -98,4 +99,48 @@ func waitGame(game string) {
 	for gameRunning(game) {
 		time.Sleep(3 * time.Second)
 	}
+}
+
+// startHotReload opens a terminal running HermesProxy's scripts/hot-reload.sh from repo against the
+// installed proxy's folder; dotnet watch asks there before a restart that would drop the game. The
+// terminal is detached so the proxy outlives this launcher, and held open if the script stops.
+func startHotReload(repo, installDir string) error {
+	term, err := exec.LookPath("konsole")
+	if err != nil {
+		return fmt.Errorf("hotreload opens the proxy in konsole, which was not found: %v", err)
+	}
+	cmd := exec.Command(term, "--separate", "--hold", "-e", filepath.Join(repo, "scripts", "hot-reload.sh"), installDir)
+	detach(cmd)
+	return cmd.Start()
+}
+
+// stopInstalledProxies stops every process running the installed binary at hermes and waits up to
+// 20 s for them to exit. It reports whether there were any.
+func stopInstalledProxies(hermes string) bool {
+	var pids []int
+	entries, _ := os.ReadDir("/proc")
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		exe, err := os.Readlink("/proc/" + e.Name() + "/exe")
+		// A binary replaced while it ran (a newer build installed) reads "<path> (deleted)".
+		if err == nil && strings.TrimSuffix(exe, " (deleted)") == hermes {
+			syscall.Kill(pid, syscall.SIGTERM)
+			pids = append(pids, pid)
+		}
+	}
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+		alive := false
+		for _, pid := range pids {
+			if syscall.Kill(pid, 0) == nil {
+				alive = true
+			}
+		}
+		if !alive {
+			break
+		}
+	}
+	return len(pids) > 0
 }

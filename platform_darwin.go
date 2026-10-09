@@ -144,3 +144,10 @@ func errorDialog(msg string) {
 	exec.Command("/usr/bin/osascript", "-e",
 		`display dialog "`+esc+`" with title "WotLK 3.4.3" buttons {"OK"} default button 1 with icon stop`).Run()
 }
+
+// startHotReload: hot-reload mode (hotreload = ... in wotlk343.ini) is only wired up on Linux.
+func startHotReload(string, string) error {
+	return fmt.Errorf("hotreload in wotlk343.ini is only supported on Linux")
+}
+
+func stopInstalledProxies(string) bool { return false }
