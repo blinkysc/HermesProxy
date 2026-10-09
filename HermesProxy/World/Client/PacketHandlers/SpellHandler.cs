@@ -296,6 +296,8 @@ public partial class WorldClient
             failed.FailedArg1 = arg1;
             failed.FailedArg2 = arg2;
             SendPacketToClient(failed);
+
+            ReleaseHeldNormalCast();
         }
         // AC EffectDuel (SPELL_FAILED_NO_DUELING) and similar hit-time checks
         // send CAST_FAILED after SPELL_GO already dequeued the pending cast.
@@ -382,6 +384,13 @@ public partial class WorldClient
     // failure for either path — without this, SMSG_SPELL_FAILURE was being silently
     // dropped, leaving the client's cast-state UI hung waiting for a never-arriving
     // success/fail and accumulating in the suspect window for `reason=7` disconnects.
+    // The player's cast has ended, so a cast the client queued behind it can go to the server.
+    void ReleaseHeldNormalCast()
+    {
+        if (GetSession().InstanceSocket is { } instanceSocket)
+            Server.Systems.SpellSystem.ReleaseHeldNormalCast(in instanceSocket.SessionContext);
+    }
+
     [HandlesSmsg(Opcode.SMSG_SPELL_FAILURE)]
     [HandlesSmsg(Opcode.SMSG_SPELL_FAILED_OTHER)]
     internal void HandleSpellFailedOther(WorldPacket packet)
@@ -591,11 +600,13 @@ public partial class WorldClient
         SpellGo spell = new SpellGo();
         spell.Cast = HandleSpellStartOrGo(packet, true);
         uint legacySpellId = (uint)spell.Cast.SpellID; // as the damage log will name it
+        bool finishedNormalCast = false;
 
         // Dequeue completed cast (queue-based, FIFO order)
         if (GetSession().GameState.CurrentPlayerGuid == spell.Cast.CasterUnit &&
             GetSession().GameState.TryDequeuePendingNormalCast((uint)spell.Cast.SpellID, out var pendingCast))
         {
+            finishedNormalCast = true;
             spell.Cast.CastID = pendingCast!.ServerGUID;
             spell.Cast.SpellXSpellVisualID = pendingCast.SpellXSpellVisualId;
             // SoM-renumbered item: rewrite the legacy spell id back to the modern one the client expects.
@@ -676,6 +687,8 @@ public partial class WorldClient
         // A damage log for this cast has to carry the id the client got, which for the player's
         // or pet's own cast is the client's, not the synthetic one.
         GetSession().GameState.NoteFinishedCast(spell.Cast.CasterUnit, legacySpellId, spell.Cast.CastID);
+        if (finishedNormalCast)
+            ReleaseHeldNormalCast();
 
         if (ModernVersion.Build == ClientVersionBuild.V3_4_3_54261
             && GetSession().GameState.CurrentPlayerGuid == spell.Cast.CasterUnit

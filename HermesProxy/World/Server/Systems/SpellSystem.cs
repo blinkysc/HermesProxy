@@ -210,29 +210,11 @@ public static class SpellSystem
             castRequest.ClientGUID = cast.Cast.CastID;
             castRequest.ServerGUID = WowGuid128.Create(HighGuidType703.Cast, SpellCastSource.Normal, (uint)ctx.GetSession().GameState.CurrentMapId!, cast.Cast.SpellID, 10000 + cast.Cast.CastID.GetCounter());
 
-            // Check if there's already a cast in progress - reject without forwarding to server
-            // This prevents interrupting the current cast (player gets "Another action is in progress")
-            if (ctx.GetSession().GameState.HasStartedNormalCast())
-            {
-                SendCastRequestFailed(in ctx, castRequest, false);
-                return;
-            }
-
             if (legacyOpenLockSpellId != 0)
                 castRequest.LegacySpellId = legacyOpenLockSpellId;
 
-            // Enqueue the cast - responses will be matched by SpellId in FIFO order
-            ctx.GetSession().GameState.PendingNormalCasts.Enqueue(castRequest);
-
-            // Native 3.4.3 sends SpellPrepare before SpellStart so the client remaps
-            // its predicted ClientCastID onto the server CastID. Doing this on CMSG
-            // (not after the AC round-trip) keeps the action-bar / cast visual bound.
-            ctx.SendPacket(new SpellPrepare
-            {
-                ClientCastID = castRequest.ClientGUID,
-                ServerCastID = castRequest.ServerGUID,
-            });
-            castRequest.PrepareSent = true;
+            StartOrHoldNormalCast(in ctx, cast.Cast, castRequest, legacyOpenLockSpellId);
+            return;
         }
 
         SendLegacyCastSpell(in ctx, cast.Cast, legacyOpenLockSpellId != 0 ? legacyOpenLockSpellId : cast.Cast.SpellID);
@@ -338,6 +320,25 @@ public static class SpellSystem
     [HandlesCmsg(Opcode.CMSG_CANCEL_CAST)]
     public static void HandleCancelCast(in CancelCast cast, in SessionContext ctx)
     {
+        // Cancelling the cast the proxy is holding: the server never saw it, so drop it here
+        // rather than cancel whatever the server is casting.
+        var state = ctx.GetSession().GameState;
+        HeldNormalCast? cancelled = null;
+        lock (state.NormalCastLock)
+        {
+            if (state.HeldNormalCast is { } held &&
+                (held.Request.ClientGUID == cast.CastID || held.Request.ServerGUID == cast.CastID))
+            {
+                cancelled = held;
+                state.HeldNormalCast = null;
+            }
+        }
+        if (cancelled != null)
+        {
+            SendCastRequestFailed(in ctx, cancelled.Request, false);
+            return;
+        }
+
         WorldPacket packet = new WorldPacket(Opcode.CMSG_CANCEL_CAST);
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
             packet.WriteUInt8(0);
@@ -492,13 +493,68 @@ public static class SpellSystem
         if (serverSpellId != 0 && serverSpellId != cast.SpellID)
             castRequest.LegacySpellId = serverSpellId;
 
-        if (ctx.GetSession().GameState.HasStartedNormalCast())
+        StartOrHoldNormalCast(in ctx, cast, castRequest, serverSpellId);
+    }
+
+    /// <summary>
+    /// Forwards a normal cast, or holds it while another normal cast is still in progress.
+    /// </summary>
+    /// <remarks>
+    /// The 3.4.3 client queues the next cast: within SpellQueueWindow (400 ms by default) of the
+    /// current cast ending it already sends CMSG_CAST_SPELL, and a native server starts that cast
+    /// as soon as the current one finishes. A 3.3.5a server would interrupt the current cast
+    /// instead, so the proxy used to answer SpellInProgress, and chain-casting lost most early
+    /// presses to "Another action is in progress" (83 of 185 Frostbolts in one capture). Holding
+    /// the cast until <see cref="ReleaseHeldNormalCast"/> gives the native behaviour; a newer press
+    /// replaces the held one, as the native queue does.
+    /// </remarks>
+    internal static void StartOrHoldNormalCast(in SessionContext ctx, SpellCastRequest cast, ClientCastRequest castRequest, uint serverSpellId)
+    {
+        var state = ctx.GetSession().GameState;
+        HeldNormalCast? replaced;
+        lock (state.NormalCastLock)
         {
-            SendCastRequestFailed(in ctx, castRequest, false);
-            return;
+            // A held cast means a release is still due, so a press that lands between the
+            // current cast ending and that release must queue behind it, not overtake it.
+            if (!state.HasStartedNormalCast() && state.HeldNormalCast == null)
+            {
+                StartNormalCast(in ctx, cast, castRequest, serverSpellId);
+                return;
+            }
+
+            replaced = state.HeldNormalCast;
+            state.HeldNormalCast = new HeldNormalCast(cast, castRequest, serverSpellId);
         }
 
+        if (replaced != null)
+            SendCastRequestFailed(in ctx, replaced.Request, false);
+    }
+
+    /// <summary>
+    /// Forwards the cast <see cref="StartOrHoldNormalCast"/> held, once no normal cast is in
+    /// progress. SpellHandler calls it after the server finishes or fails the player's cast.
+    /// </summary>
+    internal static void ReleaseHeldNormalCast(in SessionContext ctx)
+    {
+        var state = ctx.GetSession().GameState;
+        lock (state.NormalCastLock)
+        {
+            if (state.HeldNormalCast is not { } held || state.HasStartedNormalCast())
+                return;
+
+            state.HeldNormalCast = null;
+            StartNormalCast(in ctx, held.Cast, held.Request, held.ServerSpellId);
+        }
+    }
+
+    static void StartNormalCast(in SessionContext ctx, SpellCastRequest cast, ClientCastRequest castRequest, uint serverSpellId)
+    {
+        // Enqueue the cast - responses will be matched by SpellId in FIFO order
         ctx.GetSession().GameState.PendingNormalCasts.Enqueue(castRequest);
+
+        // Native 3.4.3 sends SpellPrepare before SpellStart so the client remaps
+        // its predicted ClientCastID onto the server CastID. Doing this on CMSG
+        // (not after the AC round-trip) keeps the action-bar / cast visual bound.
         ctx.SendPacket(new SpellPrepare
         {
             ClientCastID = castRequest.ClientGUID,

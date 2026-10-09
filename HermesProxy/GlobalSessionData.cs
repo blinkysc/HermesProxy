@@ -351,6 +351,10 @@ public sealed class GameSessionData
     // checks) then send SMSG_CAST_FAILED. Keep the last completed one so that
     // fail can still be forwarded instead of disappearing.
     public ClientCastRequest? LastCompletedNormalCast;
+    // The cast the 3.4.3 client queued (SpellQueueWindow) while another normal cast was still
+    // in progress; SpellSystem forwards it once that cast ends. Guarded by NormalCastLock.
+    public HeldNormalCast? HeldNormalCast;
+    public readonly Lock NormalCastLock = new();
     public ConcurrentQueue<ClientCastRequest> PendingPetCasts = new();  // pet spell casts (queue for proper FIFO handling)
     public WowGuid64 LastLootTargetGuid;
     public List<WowGuid128>? MasterLootCandidates;
@@ -2152,6 +2156,8 @@ public class ClientCastRequest
     public WowGuid128 ServerGUID;
     public WowGuid128 ItemGUID;
 }
+/// <summary>A normal cast held back by SpellSystem.StartOrHoldNormalCast, with what forwarding it needs.</summary>
+public sealed record HeldNormalCast(SpellCastRequest Cast, ClientCastRequest Request, uint ServerSpellId);
 public class ArenaTeamData
 {
     public string Name = null!;
