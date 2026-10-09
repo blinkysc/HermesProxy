@@ -76,11 +76,17 @@ internal sealed class ProxyHostedService : BackgroundService
             Log.Print(LogType.Server, $"Latency metrics collection enabled, summary every {_diagnosticsOptions.Value.MetricsIntervalSeconds} s");
         Log.Start();
 
-        if (Environment.CurrentDirectory != Path.GetDirectoryName(AppContext.BaseDirectory))
+        // HERMES_WORKING_DIRECTORY lets a build run from source (scripts/hot-reload.sh) use an
+        // installed proxy's data — CSV, AccountData, item cache, Logs, PacketsLog — instead of bin/.
+        string? workingDirOverride = Environment.GetEnvironmentVariable("HERMES_WORKING_DIRECTORY");
+        string workingDir = string.IsNullOrEmpty(workingDirOverride)
+            ? Path.GetDirectoryName(AppContext.BaseDirectory)!
+            : Path.TrimEndingDirectorySeparator(Path.GetFullPath(workingDirOverride));
+        if (Environment.CurrentDirectory != workingDir)
         {
             Log.Print(LogType.Storage, "Switching working directory");
             Log.Print(LogType.Storage, $"Old: {Environment.CurrentDirectory}");
-            Environment.CurrentDirectory = Path.GetDirectoryName(AppContext.BaseDirectory)!;
+            Environment.CurrentDirectory = workingDir;
             Log.Print(LogType.Storage, $"New: {Environment.CurrentDirectory}");
             await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
         }
