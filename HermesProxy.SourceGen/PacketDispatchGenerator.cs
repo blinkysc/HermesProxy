@@ -441,7 +441,13 @@ public sealed class PacketDispatchGenerator : IIncrementalGenerator
         sb.AppendLine("{");
         sb.AppendLine("    /// <summary>Indexed by (uint)Opcode. A null slot means no handler covers the opcode for");
         sb.AppendLine("    /// the running build; the dispatch site logs it and drops the packet.</summary>");
+        // Debug builds leave the field writable so a hot reload can swap in a rebuilt table
+        // (see Rebuild); Release keeps it readonly so the JIT can treat it as a constant.
+        sb.AppendLine("#if DEBUG");
+        sb.Append("    private static ").Append(DelegateType(legacyShape)).AppendLine("[] _table = BuildTable();");
+        sb.AppendLine("#else");
         sb.Append("    private static readonly ").Append(DelegateType(legacyShape)).AppendLine("[] _table = BuildTable();");
+        sb.AppendLine("#endif");
         sb.AppendLine();
         sb.AppendLine("    /// <summary>Opcodes this table owns. DispatchRegistryTests asserts each resolves to a");
         sb.AppendLine("    /// thunk and that the count never falls below what was converted.</summary>");
@@ -544,6 +550,18 @@ public sealed class PacketDispatchGenerator : IIncrementalGenerator
         sb.AppendLine("        _ = _table.Length;");
         sb.AppendLine("        _ = ClaimedOpcodes.Count;");
         sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("#if DEBUG");
+        sb.AppendLine("    /// <summary>");
+        sb.AppendLine("    /// Re-runs BuildTable and publishes the result. Called by HotReloadHandler after");
+        sb.AppendLine("    /// `dotnet watch` applies an edit: the static initializer never runs again, so a handler");
+        sb.AppendLine("    /// added for a previously unhandled opcode only reaches the table through here.");
+        sb.AppendLine("    /// </summary>");
+        sb.AppendLine("    internal static void Rebuild()");
+        sb.AppendLine("    {");
+        sb.AppendLine("        global::System.Threading.Volatile.Write(ref _table, BuildTable());");
+        sb.AppendLine("    }");
+        sb.AppendLine("#endif");
         sb.AppendLine();
     }
 

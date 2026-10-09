@@ -11,7 +11,11 @@ internal static unsafe class GeneratedSmsgDispatch
 {
     /// <summary>Indexed by (uint)Opcode. A null slot means no handler covers the opcode for
     /// the running build; the dispatch site logs it and drops the packet.</summary>
+#if DEBUG
+    private static delegate*<global::HermesProxy.World.Client.WorldClient, global::HermesProxy.World.WorldPacket, void>[] _table = BuildTable();
+#else
     private static readonly delegate*<global::HermesProxy.World.Client.WorldClient, global::HermesProxy.World.WorldPacket, void>[] _table = BuildTable();
+#endif
 
     /// <summary>Opcodes this table owns. DispatchRegistryTests asserts each resolves to a
     /// thunk and that the count never falls below what was converted.</summary>
@@ -41,6 +45,18 @@ internal static unsafe class GeneratedSmsgDispatch
         _ = _table.Length;
         _ = ClaimedOpcodes.Count;
     }
+
+#if DEBUG
+    /// <summary>
+    /// Re-runs BuildTable and publishes the result. Called by HotReloadHandler after
+    /// `dotnet watch` applies an edit: the static initializer never runs again, so a handler
+    /// added for a previously unhandled opcode only reaches the table through here.
+    /// </summary>
+    internal static void Rebuild()
+    {
+        global::System.Threading.Volatile.Write(ref _table, BuildTable());
+    }
+#endif
 
     private static void Thunk_HermesProxy_World_Client_WorldClient_HandleMovementMessages_CMSG_MOVE_SET_FLY(global::HermesProxy.World.Client.WorldClient client, global::HermesProxy.World.WorldPacket packet)
     {

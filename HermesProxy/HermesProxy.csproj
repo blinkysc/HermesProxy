@@ -144,4 +144,11 @@
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
     </Content>
   </ItemGroup>
+
+  <!-- Under scripts/hot-reload.sh the proxy reads config and CSV from the install directory, not
+       these copies, and dotnet watch restarts the app (dropping the game connection) when a
+       watched file it cannot hot-reload changes. Keep it from watching them. -->
+  <ItemGroup>
+    <Content Update="appsettings*.json;CSV\*.*;CSV\Hotfix\*.*" Watch="false" />
+  </ItemGroup>
 </Project>
