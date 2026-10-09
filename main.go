@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -33,6 +34,8 @@ const (
 	gameDir     = "WoW_3.4.3.54261/_classic_"
 	launcherExe = "Burralis Game Launcher.exe"
 	mirrorAddr  = "127.0.0.1:8765"
+	bnetAddr    = "127.0.0.1:1119" // HermesProxy's BNet listener (appsettings ProxyNetworkOptions.BNetPort)
+	proxyMarker = "hermes.running" // present while a proxy this launcher started is running
 	// Burralis --staticseed pins the client's auth seed to this value (its Commandline Usage.txt)
 	staticSeed = "91D59BB7D4E183A5222B5F38F4B886FF"
 )
@@ -203,6 +206,57 @@ func main() {
 		go http.ListenAndServe(mirrorAddr, http.FileServer(http.Dir(mirror)))
 	}
 
+	var proxy *exec.Cmd
+	var exited chan struct{}
+	if externalProxyRunning() {
+		// A proxy started on its own (HermesProxy's scripts/hot-reload.sh, which runs it from
+		// source) already owns the port: use it, and leave it running when the game exits.
+		fmt.Println("WotLK343: using the HermesProxy already listening on", bnetAddr)
+	} else {
+		proxy, exited = startHermes(hermes)
+	}
+
+	if err := startGame(cfg, game); err != nil {
+		fmt.Fprintln(os.Stderr, "launcher:", err)
+	}
+
+	waitGame(game) // keep the proxy (and mirror) alive until the game exits
+	if proxy != nil {
+		stop(proxy)
+		<-exited
+	}
+}
+
+// proxyListening reports whether something already accepts connections on HermesProxy's BNet port.
+func proxyListening() bool {
+	conn, err := net.DialTimeout("tcp", bnetAddr, 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
+}
+
+// externalProxyRunning reports whether a HermesProxy this launcher should use rather than start is
+// already listening. A launcher marks the proxy it starts with proxyMarker until that proxy exits,
+// so a listener with the marker present is a previous launcher's proxy still shutting down (the
+// game was restarted within a few seconds): wait for it to go, then start our own.
+func externalProxyRunning() bool {
+	if !proxyListening() {
+		return false
+	}
+	marker := filepath.Join(base, proxyMarker)
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(250 * time.Millisecond) {
+		if _, err := os.Stat(marker); os.IsNotExist(err) {
+			break
+		}
+	}
+	// Marker gone, or left behind by a launcher that was killed: trust the port either way.
+	return proxyListening()
+}
+
+// startHermes starts the HermesProxy binary with its output in hermes.log; exited closes when it ends.
+func startHermes(hermes string) (*exec.Cmd, chan struct{}) {
 	logf, _ := os.Create(filepath.Join(base, "hermes.log"))
 	proxy := exec.Command(hermes)
 	proxy.Dir = filepath.Dir(hermes)
@@ -211,19 +265,14 @@ func main() {
 	if err := proxy.Start(); err != nil {
 		fail("starting HermesProxy: %v", err)
 	}
+	marker := filepath.Join(base, proxyMarker)
+	os.WriteFile(marker, []byte(fmt.Sprintln(proxy.Process.Pid)), 0o644)
 	exited := make(chan struct{})
-	go func() { proxy.Wait(); close(exited) }()
+	go func() { proxy.Wait(); os.Remove(marker); close(exited) }()
 	select {
 	case <-exited:
 		fail("HermesProxy exited at start, see %s", filepath.Join(base, "hermes.log"))
 	case <-time.After(2 * time.Second):
 	}
-
-	if err := startGame(cfg, game); err != nil {
-		fmt.Fprintln(os.Stderr, "launcher:", err)
-	}
-
-	waitGame(game) // keep the proxy (and mirror) alive until the game exits
-	stop(proxy)
-	<-exited
+	return proxy, exited
 }
