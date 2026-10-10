@@ -163,6 +163,11 @@ public partial class WorldClient
                 }
             }
 
+            // The 3.4 auction mail layout is TrinityCore wotlk_classic's; the older Classic clients'
+            // is not known, so they keep the server's strings.
+            if (mail.SenderType == MailType.Auction && ModernVersion.ExpansionVersion >= 3)
+                TranslateAuctionMailText(mail);
+
             result.Mails.Add(mail);
         }
 
@@ -227,6 +232,15 @@ public partial class WorldClient
         }
 
         GetSession().ToClient.Notify(OutboxEvent.ItemText(itemTextId));
+    }
+
+    /// <summary>See <see cref="AuctionMailText"/>.</summary>
+    void TranslateAuctionMailText(MailListEntry mail)
+    {
+        (mail.Subject, int? type) = AuctionMailText.Subject(mail.Subject);
+        // Before 3.3.0 the body is an item text the client asks for separately.
+        if (type is int mailType && LegacyVersion.AddedInVersion(ClientVersionBuild.V3_3_0_10958))
+            mail.Body = AuctionMailText.Body(mail.Body, mailType, raw => new WowGuid64(raw).To128(GetSession().GameState));
     }
 
     MailAttachedItem ReadMailItem(WorldPacket packet)
