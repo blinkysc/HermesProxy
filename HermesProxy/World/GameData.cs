@@ -108,6 +108,7 @@ public static partial class GameData
     public static FrozenSet<uint> MountAuras = FrozenSet<uint>.Empty;
     public static FrozenSet<uint> NextMeleeSpells = FrozenSet<uint>.Empty;
     public static FrozenSet<uint> AutoRepeatSpells = FrozenSet<uint>.Empty;
+    public static FrozenDictionary<uint, Server.Systems.SpellGcdData> SpellGlobalCooldowns = FrozenDictionary<uint, Server.Systems.SpellGcdData>.Empty;
     public static FrozenSet<uint> AuraSpells = FrozenSet<uint>.Empty;
     public static FrozenSet<uint> PassiveSpells = FrozenSet<uint>.Empty;
     public static FrozenDictionary<uint, int> AuraDurations = FrozenDictionary<uint, int>.Empty;
@@ -759,6 +760,7 @@ public static partial class GameData
             LoadMountAuras,
             LoadMeleeSpells,
             LoadAutoRepeatSpells,
+            LoadSpellGlobalCooldowns,
             LoadAuraSpells,
             LoadPassiveSpells,
             LoadAuraDurations,
@@ -2007,6 +2009,39 @@ public static partial class GameData
         }
         AutoRepeatSpells = set.ToFrozenSet();
     }
+    /// <summary>
+    /// The spells' global cooldown inputs (see <see cref="Server.Systems.GlobalCooldown"/>). Without
+    /// the file the proxy cannot tell when the server's global cooldown ends and queues the
+    /// client's next cast only behind a cast in progress.
+    /// </summary>
+    public static void LoadSpellGlobalCooldowns()
+    {
+        var path = Path.Combine("CSV", $"SpellGlobalCooldowns{ModernVersion.ExpansionVersion}.csv");
+        if (!File.Exists(path))
+            return;
+
+        // The masks and attributes are 32-bit flag words that the DB2 export prints signed.
+        using var reader = Sep.Reader(o => o with { HasHeader = true }).FromFile(path);
+        var spells = new Dictionary<uint, Server.Systems.SpellGcdData>(EstimateRowCount(path, 40));
+        foreach (var row in reader)
+        {
+            spells[uint.Parse(row["SpellId"].Span)] = new Server.Systems.SpellGcdData(
+                uint.Parse(row["StartRecoveryTime"].Span),
+                uint.Parse(row["StartRecoveryCategory"].Span),
+                byte.Parse(row["DmgClass"].Span),
+                (uint)long.Parse(row["Attributes0"].Span),
+                (uint)long.Parse(row["Attributes3"].Span),
+                uint.Parse(row["SpellClassSet"].Span),
+                (uint)long.Parse(row["SpellClassMask0"].Span),
+                (uint)long.Parse(row["SpellClassMask1"].Span),
+                (uint)long.Parse(row["SpellClassMask2"].Span));
+        }
+        SpellGlobalCooldowns = spells.ToFrozenDictionary();
+    }
+
+    public static Server.Systems.SpellGcdData GetSpellGlobalCooldown(uint spellId)
+        => SpellGlobalCooldowns.TryGetValue(spellId, out var data) ? data : default;
+
     public static void LoadAuraSpells()
     {
         var path = Path.Combine("CSV", $"AuraSpells{LegacyVersion.ExpansionVersion}.csv");

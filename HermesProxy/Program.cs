@@ -23,6 +23,9 @@ public class Program
 {
     public static async Task<int> Main(string[] args)
     {
+#if DEBUG
+        HotReloadHandler.ExitWithWatcher();
+#endif
         // Enable .NET createdump on native crashes / FailFast / stack overflow /
         // GC corruption — managed exceptions are already covered by the handlers
         // below, but native-side faults terminate the process *without* firing

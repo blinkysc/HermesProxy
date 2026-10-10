@@ -363,6 +363,42 @@ def build_item_spells_data(build: str) -> tuple[list[str], list[list[str]]]:
     return ["ID", "Category", "RecoveryTime", "CategoryRecoveryTime"], rows
 
 
+def build_spell_global_cooldowns(build: str) -> tuple[list[str], list[list[str]]]:
+    """What SpellCastQueue needs to replay a 3.3.5a server's global cooldown for a spell:
+    the inputs of AzerothCore's Spell::TriggerGlobalCooldown and the spell-family mask its
+    GCD spell modifiers match against.
+
+    Only spells with a start-recovery time or category are listed. Every other spell has
+    both at 0, which is what an absent row means to the loader.
+    """
+    def by_spell(table: str) -> dict[str, dict[str, str]]:
+        return {r["SpellID"]: r for r in read_csv(fetch_client_csv(table, build)) if r.get("DifficultyID", "0") == "0"}
+
+    cooldowns = by_spell("SpellCooldowns")
+    categories = by_spell("SpellCategories")
+    misc = by_spell("SpellMisc")
+    class_options = {r["SpellID"]: r for r in read_csv(fetch_client_csv("SpellClassOptions", build))}
+
+    rows = []
+    for spell_id in sorted(set(cooldowns) | set(categories), key=int):
+        recovery = cooldowns.get(spell_id, {}).get("StartRecoveryTime", "0")
+        category = categories.get(spell_id, {}).get("StartRecoveryCategory", "0")
+        if recovery == "0" and category == "0":
+            continue
+        m = misc.get(spell_id, {})
+        c = class_options.get(spell_id, {})
+        rows.append([
+            spell_id, recovery, category,
+            categories.get(spell_id, {}).get("DefenseType", "0"),
+            m.get("Attributes_0", "0"), m.get("Attributes_3", "0"),
+            c.get("SpellClassSet", "0"),
+            c.get("SpellClassMask_0", "0"), c.get("SpellClassMask_1", "0"), c.get("SpellClassMask_2", "0"),
+        ])
+    header = ["SpellId", "StartRecoveryTime", "StartRecoveryCategory", "DmgClass",
+              "Attributes0", "Attributes3", "SpellClassSet", "SpellClassMask0", "SpellClassMask1", "SpellClassMask2"]
+    return header, rows
+
+
 def build_item_display_id_to_file_data_id(build: str) -> tuple[list[str], list[list[str]]]:
     """legacy DisplayID -> modern icon FileDataID. ADDITIVE ONLY.
 
@@ -485,6 +521,10 @@ RECIPES: dict[str, Recipe] = {
     "AuraSpells3.csv": Recipe(builder=build_aura_spells, note="SpellEffect apply-aura effects"),
     "ItemSpellsData3.csv": Recipe(
         builder=build_item_spells_data, note="SpellCategories + SpellCooldowns"
+    ),
+    "SpellGlobalCooldowns3.csv": Recipe(
+        builder=build_spell_global_cooldowns,
+        note="SpellCooldowns + SpellCategories + SpellMisc + SpellClassOptions",
     ),
     "ItemDisplayIdToFileDataId3.csv": Recipe(
         builder=build_item_display_id_to_file_data_id,

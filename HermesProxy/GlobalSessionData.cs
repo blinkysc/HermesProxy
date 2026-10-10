@@ -351,6 +351,11 @@ public sealed class GameSessionData
     // checks) then send SMSG_CAST_FAILED. Keep the last completed one so that
     // fail can still be forwarded instead of disappearing.
     public ClientCastRequest? LastCompletedNormalCast;
+    // The cast count last given to a forwarded cast. See NextCastCount.
+    public byte LastCastCount;
+    // When the server's global cooldown of each start-recovery category is over, in proxy
+    // Environment.TickCount64 milliseconds. See StartGlobalCooldown.
+    public readonly Dictionary<uint, long> GlobalCooldownEnds = new();
     // Set when the player's create goes to the client, cleared by the first movement packet the
     // client sends without Falling. See MovementHandler.SendOwnCanFlyChange.
     public bool OwnSpawnFallPending;
@@ -1649,7 +1654,7 @@ public sealed class GameSessionData
     /// Try to find and dequeue a pending cast by SpellId.
     /// Uses FIFO order since TCP guarantees packet ordering.
     /// </summary>
-    public bool TryDequeuePendingNormalCast(uint spellId, out ClientCastRequest? cast)
+    public bool TryDequeuePendingNormalCast(uint spellId, byte castCount, out ClientCastRequest? cast)
     {
         // Since TCP preserves order, the first matching SpellId is the correct one
         var pending = new List<ClientCastRequest>();
@@ -1657,7 +1662,7 @@ public sealed class GameSessionData
 
         while (PendingNormalCasts.TryDequeue(out var current))
         {
-            if (cast == null && CastMatchesSpellId(current, spellId))
+            if (cast == null && CastMatches(current, spellId, castCount))
             {
                 cast = current;
             }
@@ -1689,15 +1694,108 @@ public sealed class GameSessionData
     }
 
     /// <summary>
+    /// Whether a server reply naming <paramref name="spellId"/> and <paramref name="castCount"/>
+    /// answers <paramref name="cast"/>. With cast counts the count decides: two casts of one
+    /// spell are otherwise indistinguishable, and a reply with count 0 answers no client cast
+    /// (the server's own triggered spells). Without them (a pre-3.0.2 server) the spell id
+    /// does, in request order.
+    /// </summary>
+    public static bool CastMatches(ClientCastRequest cast, uint spellId, byte castCount)
+        => cast.CastCount == castCount && CastMatchesSpellId(cast, spellId);
+
+    /// <summary>The pending cast a reply answers, left in place.</summary>
+    public ClientCastRequest? PeekPendingNormalCast(uint spellId, byte castCount)
+    {
+        foreach (var item in PendingNormalCasts)
+        {
+            if (CastMatches(item, spellId, castCount))
+                return item;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The cast count for the next forwarded cast, 1-255. A pending cast still holding the
+    /// count was sent 255 casts ago and the server never answered it (it drops some requests
+    /// without a reply, e.g. a spell the character does not know); it is dropped so the
+    /// count cannot match a reply to the new cast.
+    /// </summary>
+    public byte NextCastCount()
+    {
+        LastCastCount = LastCastCount == byte.MaxValue ? (byte)1 : (byte)(LastCastCount + 1);
+        byte count = LastCastCount;
+        if (PendingNormalCasts.Any(c => c.CastCount == count))
+        {
+            var keep = PendingNormalCasts.Where(c => c.CastCount != count).ToList();
+            ClearPendingNormalCasts();
+            foreach (var item in keep)
+                PendingNormalCasts.Enqueue(item);
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Records the global cooldown the server started for <paramref name="cast"/>, which it
+    /// just reported casting (SPELL_START, or SPELL_GO for a cast without one).
+    /// </summary>
+    /// <remarks>
+    /// The server started it <paramref name="now"/> minus the reply's travel time, and a cast
+    /// the proxy sends reaches it a request's travel time later. Ending the wait a minimum
+    /// round trip early therefore lands the next cast at the server no earlier than its global
+    /// cooldown ends. With no round trip measured yet, the wait is the full cooldown.
+    /// </remarks>
+    public void StartGlobalCooldown(ClientCastRequest cast, long now, int minRoundTripMs)
+    {
+        uint serverSpellId = cast.LegacySpellId != 0 ? cast.LegacySpellId : cast.SpellId;
+        var data = GameData.GetSpellGlobalCooldown(serverSpellId);
+        FlatSpellMods.TryGetValue(HermesProxy.World.Server.Systems.GlobalCooldown.SpellModOpGlobalCooldown, out var flat);
+        PctSpellMods.TryGetValue(HermesProxy.World.Server.Systems.GlobalCooldown.SpellModOpGlobalCooldown, out var pct);
+        int gcd = HermesProxy.World.Server.Systems.GlobalCooldown.Compute(data, GetPlayerModCastSpeed(), GetUnitClass(CurrentPlayerGuid), flat, pct);
+        if (gcd <= 0)
+            return;
+
+        long end = now + gcd - minRoundTripMs;
+        GlobalCooldownEnds[data.StartRecoveryCategory] = end;
+        cast.GcdCategory = data.StartRecoveryCategory;
+        cast.GcdEnd = end;
+    }
+
+    /// <summary>
+    /// The server cancels the global cooldown of a cast interrupted before it went off
+    /// (Spell::cancel), unless a later cast has since started another.
+    /// </summary>
+    public void CancelGlobalCooldown(ClientCastRequest cast)
+    {
+        if (cast.GcdEnd != 0 && GlobalCooldownEnds.TryGetValue(cast.GcdCategory, out long end) && end == cast.GcdEnd)
+            GlobalCooldownEnds.Remove(cast.GcdCategory);
+    }
+
+    /// <summary>Milliseconds until the server's global cooldown no longer blocks <paramref name="spellId"/>.</summary>
+    public long GlobalCooldownRemaining(uint spellId, long now)
+    {
+        uint category = GameData.GetSpellGlobalCooldown(spellId).StartRecoveryCategory;
+        return GlobalCooldownEnds.TryGetValue(category, out long end) && end > now ? end - now : 0;
+    }
+
+    private float GetPlayerModCastSpeed()
+    {
+        int field = LegacyVersion.GetUpdateField(UnitField.UNIT_MOD_CAST_SPEED);
+        if (field >= 0 && GetCachedObjectFieldsLegacy(CurrentPlayerGuid) is { } fields &&
+            fields.TryGetValue(field, out var value) && value.FloatValue > 0)
+            return value.FloatValue;
+        return 1.0f;
+    }
+
+    /// <summary>
     /// Try to find a pending cast by SpellId and mark it as started (for SPELL_START).
     /// </summary>
-    public bool TryMarkPendingNormalCastStarted(uint spellId, out ClientCastRequest? cast)
+    public bool TryMarkPendingNormalCastStarted(uint spellId, byte castCount, out ClientCastRequest? cast)
     {
         cast = null;
 
         foreach (var item in PendingNormalCasts)
         {
-            if (CastMatchesSpellId(item, spellId) && !item.HasStarted)
+            if (CastMatches(item, spellId, castCount) && !item.HasStarted)
             {
                 item.HasStarted = true;
                 cast = item;
@@ -1730,32 +1828,6 @@ public sealed class GameSessionData
         return false;
     }
 
-    /// <summary>
-    /// Clear only pending normal casts that haven't started yet.
-    /// Keeps started casts so SPELL_GO can dequeue them later.
-    /// Returns the cleared casts so they can be failed.
-    /// </summary>
-    public List<ClientCastRequest> ClearNonStartedNormalCasts()
-    {
-        var cleared = new List<ClientCastRequest>();
-        var keep = new List<ClientCastRequest>();
-
-        while (PendingNormalCasts.TryDequeue(out var current))
-        {
-            if (current.HasStarted)
-                keep.Add(current);
-            else
-                cleared.Add(current);
-        }
-
-        // Re-enqueue started casts
-        foreach (var item in keep)
-        {
-            PendingNormalCasts.Enqueue(item);
-        }
-
-        return cleared;
-    }
 
     /// <summary>
     /// Try to find and dequeue a pending pet cast by SpellId.
@@ -2150,6 +2222,12 @@ public sealed class GameSessionData
 public class ClientCastRequest
 {
     public bool HasStarted;
+    // The cast count the proxy sent with it; a 3.0.2+ legacy server echoes it in every reply
+    // to this cast (SPELL_START, SPELL_GO, CAST_FAILED, SPELL_FAILURE). 0 for a server that has none.
+    public byte CastCount;
+    // The global cooldown this cast started on the server, so an interruption can cancel it.
+    public uint GcdCategory;
+    public long GcdEnd;
     public bool PrepareSent;
     public uint SpellId;
     public uint LegacySpellId; // 0 = same as SpellId; non-zero when modern client used a renumbered spell (e.g. SoM 1.14.1+ items)

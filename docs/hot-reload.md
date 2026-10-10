@@ -31,6 +31,11 @@ its own. `dotnet watch` output is copied to `Logs/dotnet-watch.log`.
 On a rude edit `dotnet watch` asks whether to restart. Restarting disconnects the game; answering
 no leaves the old code running until the next restart.
 
+`dotnet watch` restarts the app by killing the `dotnet run` process it starts it through, which
+does not reach the proxy itself. Under `dotnet watch` (Debug, Linux) the proxy therefore checks every
+second whether that parent is gone and shuts down normally when it is, instead of lingering as an
+orphan next to its replacement.
+
 The dispatch tables are built once by static initializers, which never re-run. In Debug builds
 the generated `GeneratedCmsgDispatch` / `GeneratedSmsgDispatch` keep their table writable and
 expose `Rebuild()`, and `HotReloadHandler` (a `MetadataUpdateHandler`) calls both after every

@@ -820,10 +820,49 @@ public partial class WorldClient
         }
     }
 
+    // Pings in flight to the server (serial -> Environment.TickCount64 sent) and the last round
+    // trips they measured. Pings are sent from the socket and session threads, answered on this one.
+    private readonly Lock _pingLock = new();
+    private readonly Dictionary<uint, long> _pingsInFlight = new();
+    private readonly Queue<int> _recentRoundTrips = new();
+    private const int RoundTripSamples = 8;
+
+    /// <summary>
+    /// The smallest of the last 8 measured round trips to the legacy server, in milliseconds; 0
+    /// until the first ping is answered. A lower bound on how long a request and its reply take
+    /// together, which the cast queue uses to time a cast to the server's global cooldown.
+    /// </summary>
+    public int ServerRoundTripMinMs { get; private set; }
+
+    private void RecordPong(uint serial)
+    {
+        long now = Environment.TickCount64;
+        lock (_pingLock)
+        {
+            if (!_pingsInFlight.Remove(serial, out long sent))
+                return;
+            _recentRoundTrips.Enqueue((int)(now - sent));
+            if (_recentRoundTrips.Count > RoundTripSamples)
+                _recentRoundTrips.Dequeue();
+            int min = int.MaxValue;
+            foreach (int roundTrip in _recentRoundTrips)
+                min = Math.Min(min, roundTrip);
+            ServerRoundTripMinMs = min;
+        }
+    }
+
     public void SendPing(uint ping, uint latency)
     {
         if (!IsConnected() || _isSuccessful == false)
             return;
+
+        lock (_pingLock)
+        {
+            // A ping the server never answered would sit here forever; a handful in flight is normal.
+            if (_pingsInFlight.Count > 16)
+                _pingsInFlight.Clear();
+            _pingsInFlight[ping] = Environment.TickCount64;
+        }
 
         WorldPacket packet = new WorldPacket(Opcode.CMSG_PING);
         packet.WriteUInt32(ping);

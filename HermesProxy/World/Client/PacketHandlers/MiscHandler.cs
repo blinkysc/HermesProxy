@@ -20,6 +20,7 @@ public partial class WorldClient
     internal void HandlePingResponse(WorldPacket packet)
     {
         uint serial = packet.ReadUInt32();
+        RecordPong(serial);
         if ((serial & 0x80000000) != 0)
             return; // keepalive pong, don't forward to modern client
         SendPacketToClient(new Pong(serial));

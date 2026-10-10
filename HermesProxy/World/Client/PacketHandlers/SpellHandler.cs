@@ -220,8 +220,10 @@ public partial class WorldClient
     [HandlesSmsg(Opcode.SMSG_CAST_FAILED)]
     internal void HandleCastFailed(WorldPacket packet)
     {
+        // The count of the request this answers; requests carry one from 3.0.2 (NextCastCount).
+        byte castCount = 0;
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
-            packet.ReadUInt8(); // cast count
+            castCount = packet.ReadUInt8();
 
         uint spellId = packet.ReadUInt32();
         if (LegacyVersion.RemovedInVersion(ClientVersionBuild.V2_0_1_6180))
@@ -277,10 +279,14 @@ public partial class WorldClient
             else
                 GetSession().GameState.CurrentClientNextMeleeCast = null;
         }
-        // Look up pending normal cast by SpellId (queue-based, FIFO order)
-        else if (GetSession().GameState.TryDequeuePendingNormalCast(spellId, out var pendingCast))
+        else if (GetSession().GameState.TryDequeuePendingNormalCast(spellId, castCount, out var pendingCast))
         {
-            if (!pendingCast!.HasStarted)
+            // An interrupted cast takes its global cooldown with it (Spell::cancel).
+            if (pendingCast!.HasStarted)
+            {
+                GetSession().GameState.CancelGlobalCooldown(pendingCast);
+            }
+            else
             {
                 SpellPrepare prepare2 = new SpellPrepare();
                 prepare2.ClientCastID = pendingCast.ClientGUID;
@@ -302,7 +308,7 @@ public partial class WorldClient
         // AC EffectDuel (SPELL_FAILED_NO_DUELING) and similar hit-time checks
         // send CAST_FAILED after SPELL_GO already dequeued the pending cast.
         else if (GetSession().GameState.LastCompletedNormalCast is { } completed &&
-                 (completed.SpellId == spellId || (completed.LegacySpellId != 0 && completed.LegacySpellId == spellId)))
+                 GameSessionData.CastMatches(completed, spellId, castCount))
         {
             CastFailed failed = new();
             failed.SpellID = completed.SpellId;
@@ -401,8 +407,9 @@ public partial class WorldClient
         else
             casterUnit = packet.ReadGuid().To128(GetSession().GameState);
 
+        byte castCount = 0;
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
-            packet.ReadUInt8(); // Cast Count
+            castCount = packet.ReadUInt8();
 
         uint spellId = packet.ReadUInt32();
         byte reason = 61;
@@ -414,7 +421,7 @@ public partial class WorldClient
         // Try to find pending cast info (peek, don't remove - this is informational).
         // Match by either modern SpellId or LegacySpellId for SoM-renumbered items.
         if (GetSession().GameState.CurrentPlayerGuid == casterUnit &&
-            GetSession().GameState.PendingNormalCasts.FirstOrDefault(c => c.SpellId == spellId || (c.LegacySpellId != 0 && c.LegacySpellId == spellId)) is { } pendingNormal)
+            GetSession().GameState.PeekPendingNormalCast(spellId, castCount) is { } pendingNormal)
         {
             castId = pendingNormal.ServerGUID;
             spellVisual = pendingNormal.SpellXSpellVisualId;
@@ -461,10 +468,12 @@ public partial class WorldClient
         SpellStart spell = new SpellStart();
         spell.Cast = HandleSpellStartOrGo(packet, false);
 
-        // Mark pending cast as started (queue-based, FIFO order)
         if (GetSession().GameState.CurrentPlayerGuid == spell.Cast.CasterUnit &&
-            GetSession().GameState.TryMarkPendingNormalCastStarted((uint)spell.Cast.SpellID, out var pendingCast))
+            GetSession().GameState.TryMarkPendingNormalCastStarted((uint)spell.Cast.SpellID, spell.Cast.LegacyCastCount, out var pendingCast))
         {
+            // The server starts a cast's global cooldown as it starts the cast.
+            GetSession().GameState.StartGlobalCooldown(pendingCast!, Environment.TickCount64, ServerRoundTripMinMs);
+
             spell.Cast.CastID = pendingCast!.ServerGUID;
             spell.Cast.SpellXSpellVisualID = pendingCast.SpellXSpellVisualId;
             // SoM-renumbered item: rewrite the legacy spell id back to the modern one the client expects.
@@ -479,16 +488,6 @@ public partial class WorldClient
                     ServerCastID = spell.Cast.CastID,
                 });
                 pendingCast.PrepareSent = true;
-            }
-
-            // Clear non-started casts and send failures for them
-            // (keeps the started cast so SPELL_GO can dequeue it)
-            var failedCasts = GetSession().GameState.ClearNonStartedNormalCasts();
-            // The instance socket is gone after logout; the casts are moot then.
-            if (GetSession().InstanceSocket is { } instanceSocket)
-            {
-                foreach (var failed in failedCasts)
-                    Server.Systems.SpellSystem.SendCastRequestFailed(in instanceSocket.SessionContext, failed, false);
             }
         }
         else if (GetSession().GameState.CurrentPetGuid == spell.Cast.CasterUnit &&
@@ -602,11 +601,13 @@ public partial class WorldClient
         uint legacySpellId = (uint)spell.Cast.SpellID; // as the damage log will name it
         bool finishedNormalCast = false;
 
-        // Dequeue completed cast (queue-based, FIFO order)
         if (GetSession().GameState.CurrentPlayerGuid == spell.Cast.CasterUnit &&
-            GetSession().GameState.TryDequeuePendingNormalCast((uint)spell.Cast.SpellID, out var pendingCast))
+            GetSession().GameState.TryDequeuePendingNormalCast((uint)spell.Cast.SpellID, spell.Cast.LegacyCastCount, out var pendingCast))
         {
             finishedNormalCast = true;
+            // A cast the server reported no SPELL_START for started its global cooldown just now.
+            if (!pendingCast!.HasStarted)
+                GetSession().GameState.StartGlobalCooldown(pendingCast, Environment.TickCount64, ServerRoundTripMinMs);
             spell.Cast.CastID = pendingCast!.ServerGUID;
             spell.Cast.SpellXSpellVisualID = pendingCast.SpellXSpellVisualId;
             // SoM-renumbered item: rewrite the legacy spell id back to the modern one the client expects.
@@ -730,7 +731,7 @@ public partial class WorldClient
         // would get overwritten when spamming spells, causing CastID mismatches.
 
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
-            packet.ReadUInt8(); // cast count
+            dbdata.LegacyCastCount = packet.ReadUInt8();
 
         dbdata.SpellID = packet.ReadInt32();
         dbdata.SpellXSpellVisualID = GameData.GetSpellVisual((uint)dbdata.SpellID);

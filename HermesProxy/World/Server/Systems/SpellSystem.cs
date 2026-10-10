@@ -8,6 +8,7 @@ using HermesProxy.World.Dispatch;
 using HermesProxy.World.Enums;
 using HermesProxy.World.Logging;
 using HermesProxy.World.Objects;
+using HermesProxy.World.Outbox;
 using HermesProxy.World.Server.Packets;
 
 namespace HermesProxy.World.Server.Systems;
@@ -217,7 +218,8 @@ public static class SpellSystem
             return;
         }
 
-        SendLegacyCastSpell(in ctx, cast.Cast, legacyOpenLockSpellId != 0 ? legacyOpenLockSpellId : cast.Cast.SpellID);
+        SendLegacyCastSpell(in ctx, cast.Cast, legacyOpenLockSpellId != 0 ? legacyOpenLockSpellId : cast.Cast.SpellID,
+            NextCastCount(ctx.GetSession().GameState));
     }
 
     [HandlesCmsg(Opcode.CMSG_PET_CAST_SPELL)]
@@ -274,7 +276,8 @@ public static class SpellSystem
         if (legacySpellId != 0)
             castRequest.LegacySpellId = legacySpellId;
 
-        // Enqueue the cast - responses will be matched by SpellId (or LegacySpellId) in FIFO order
+        // Replies are matched by cast count (by spell id, in order, on a pre-3.0.2 server).
+        castRequest.CastCount = NextCastCount(ctx.GetSession().GameState);
         ctx.GetSession().GameState.PendingNormalCasts.Enqueue(castRequest);
 
         WorldPacket packet = new WorldPacket(Opcode.CMSG_USE_ITEM);
@@ -298,7 +301,7 @@ public static class SpellSystem
         else
         {
             // WotLK 3.3.5a: bagIndex, slot, cast_count, spellId, itemGuid, glyphIndex, cast_flags, targets
-            packet.WriteUInt8(0); // cast_count
+            packet.WriteUInt8(castRequest.CastCount);
             packet.WriteUInt32(resolvedSpellId);
             packet.WriteGuid(use.CastItem.To64());
             // Modern V3_4_3 client encodes the target glyph slot in SpellCastRequest.Misc[0]
@@ -497,16 +500,17 @@ public static class SpellSystem
     }
 
     /// <summary>
-    /// Forwards a normal cast, or holds it while another normal cast is still in progress.
+    /// Forwards a normal cast, or queues it until the server can start it.
     /// </summary>
     /// <remarks>
     /// The 3.4.3 client queues the next cast: within SpellQueueWindow (400 ms by default) of the
-    /// current cast ending it already sends CMSG_CAST_SPELL, and a native server starts that cast
-    /// as soon as the current one finishes. A 3.3.5a server would interrupt the current cast
-    /// instead, so the proxy used to answer SpellInProgress, and chain-casting lost most early
-    /// presses to "Another action is in progress" (83 of 185 Frostbolts in one capture). Holding
-    /// the cast until <see cref="ReleaseHeldNormalCast"/> gives the native behaviour; a newer press
-    /// replaces the held one, as the native queue does.
+    /// current cast or global cooldown ending it already sends CMSG_CAST_SPELL, and a native
+    /// server holds that cast and starts it the moment it can. A 3.3.5a server does not
+    /// (AzerothCore's SpellQueue is off on ChromieCraft, cMaNGOS allows 50 ms): it answers
+    /// SpellInProgress or NotReady, and early presses were lost. The proxy queues instead, by
+    /// AzerothCore's own SpellQueue rule: the cast waits while a cast is in progress or the
+    /// spell's global cooldown runs (<see cref="GlobalCooldown"/>), one cast at a time, a newer
+    /// press replacing the queued one.
     /// </remarks>
     internal static void StartOrHoldNormalCast(in SessionContext ctx, SpellCastRequest cast, ClientCastRequest castRequest, uint serverSpellId)
     {
@@ -514,9 +518,8 @@ public static class SpellSystem
         HeldNormalCast? replaced;
         lock (state.NormalCastLock)
         {
-            // A held cast means a release is still due, so a press that lands between the
-            // current cast ending and that release must queue behind it, not overtake it.
-            if (!state.HasStartedNormalCast() && state.HeldNormalCast == null)
+            // A queued cast goes first: a press arriving while one waits replaces it.
+            if (state.HeldNormalCast == null && BlockedForMs(state, castRequest, Environment.TickCount64) == 0)
             {
                 StartNormalCast(in ctx, cast, castRequest, serverSpellId);
                 return;
@@ -528,29 +531,66 @@ public static class SpellSystem
 
         if (replaced != null)
             SendCastRequestFailed(in ctx, replaced.Request, false);
+        ReleaseHeldNormalCast(in ctx);
     }
 
     /// <summary>
-    /// Forwards the cast <see cref="StartOrHoldNormalCast"/> held, once no normal cast is in
-    /// progress. SpellHandler calls it after the server finishes or fails the player's cast.
+    /// Forwards the queued cast if the server can start it now; otherwise, when only the global
+    /// cooldown is in the way, arranges to come back when it ends. SpellHandler also calls it when
+    /// the cast in progress ends (SPELL_GO, CAST_FAILED).
     /// </summary>
     internal static void ReleaseHeldNormalCast(in SessionContext ctx)
     {
-        var state = ctx.GetSession().GameState;
+        var session = ctx.GetSession();
+        var state = session.GameState;
         lock (state.NormalCastLock)
         {
-            if (state.HeldNormalCast is not { } held || state.HasStartedNormalCast())
+            if (state.HeldNormalCast is not { } held)
                 return;
+
+            long wait = BlockedForMs(state, held.Request, Environment.TickCount64);
+            if (wait < 0)
+                return;
+            if (wait > 0)
+            {
+                ScheduleHeldCastRelease(session, wait);
+                return;
+            }
 
             state.HeldNormalCast = null;
             StartNormalCast(in ctx, held.Cast, held.Request, held.ServerSpellId);
         }
     }
 
+    internal static readonly HoldKey HeldCastReleaseKey = new(HoldKeyKind.HeldCastRelease);
+
+    /// <summary>
+    /// -1 while a normal cast is in progress (its end calls <see cref="ReleaseHeldNormalCast"/>),
+    /// otherwise the milliseconds of global cooldown left for the cast's spell, 0 when it can go.
+    /// </summary>
+    internal static long BlockedForMs(GameSessionData state, ClientCastRequest request, long now)
+    {
+        if (state.HasStartedNormalCast())
+            return -1;
+        return state.GlobalCooldownRemaining(request.LegacySpellId != 0 ? request.LegacySpellId : request.SpellId, now);
+    }
+
+    static void ScheduleHeldCastRelease(GlobalSessionData session, long delayMs)
+    {
+        session.ToClient.Cancel(HeldCastReleaseKey);
+        session.ToClient.Delay(TimeSpan.FromMilliseconds(delayMs), () =>
+        {
+            if (session.InstanceSocket is { } socket)
+                ReleaseHeldNormalCast(in socket.SessionContext);
+        }, new HoldOptions(Key: HeldCastReleaseKey));
+    }
+
     static void StartNormalCast(in SessionContext ctx, SpellCastRequest cast, ClientCastRequest castRequest, uint serverSpellId)
     {
-        // Enqueue the cast - responses will be matched by SpellId in FIFO order
-        ctx.GetSession().GameState.PendingNormalCasts.Enqueue(castRequest);
+        var state = ctx.GetSession().GameState;
+        castRequest.CastCount = NextCastCount(state);
+        // Replies are matched by cast count (by spell id, in order, on a pre-3.0.2 server).
+        state.PendingNormalCasts.Enqueue(castRequest);
 
         // Native 3.4.3 sends SpellPrepare before SpellStart so the client remaps
         // its predicted ClientCastID onto the server CastID. Doing this on CMSG
@@ -561,10 +601,18 @@ public static class SpellSystem
             ServerCastID = castRequest.ServerGUID,
         });
         castRequest.PrepareSent = true;
-        SendLegacyCastSpell(in ctx, cast, serverSpellId != 0 ? serverSpellId : cast.SpellID);
+        SendLegacyCastSpell(in ctx, cast, serverSpellId != 0 ? serverSpellId : cast.SpellID, castRequest.CastCount);
     }
 
-    static void SendLegacyCastSpell(in SessionContext ctx, SpellCastRequest cast, uint spellId)
+    /// <summary>
+    /// The cast count for a cast about to be forwarded: what a 3.3.5a client sends, so the
+    /// server's replies can be told apart and it applies its own in-progress check. 0 for a
+    /// server older than 3.0.2, which matches replies by spell id.
+    /// </summary>
+    static byte NextCastCount(GameSessionData state)
+        => LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056) ? state.NextCastCount() : (byte)0;
+
+    static void SendLegacyCastSpell(in SessionContext ctx, SpellCastRequest cast, uint spellId, byte castCount)
     {
         SpellCastTargetFlags targetFlags = ConvertSpellTargetFlags(cast.Target);
 
@@ -585,11 +633,11 @@ public static class SpellSystem
         else if (LegacyVersion.RemovedInVersion(ClientVersionBuild.V3_0_2_9056))
         {
             packet.WriteUInt32(spellId);
-            packet.WriteUInt8(0); // cast count
+            packet.WriteUInt8(castCount);
         }
         else
         {
-            packet.WriteUInt8(0); // cast count
+            packet.WriteUInt8(castCount);
             packet.WriteUInt32(spellId);
             packet.WriteUInt8((byte)cast.SendCastFlags);
         }

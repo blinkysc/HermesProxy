@@ -1141,6 +1141,9 @@ class SpellGo : ServerPacket
 
 public class SpellCastData
 {
+    /// <summary>The legacy server's echo of the request's cast count. Not part of the modern packet.</summary>
+    public byte LegacyCastCount;
+
     public void Write(WorldPacket data)
     {
         data.WritePackedGuid128(CasterGUID);
