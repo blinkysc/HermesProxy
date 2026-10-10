@@ -351,6 +351,9 @@ public sealed class GameSessionData
     // checks) then send SMSG_CAST_FAILED. Keep the last completed one so that
     // fail can still be forwarded instead of disappearing.
     public ClientCastRequest? LastCompletedNormalCast;
+    // Set when the player's create goes to the client, cleared by the first movement packet the
+    // client sends without Falling. See MovementHandler.SendOwnCanFlyChange.
+    public bool OwnSpawnFallPending;
     // The cast the 3.4.3 client queued (SpellQueueWindow) while another normal cast was still
     // in progress; SpellSystem forwards it once that cast ends. Guarded by NormalCastLock.
     public HeldNormalCast? HeldNormalCast;
