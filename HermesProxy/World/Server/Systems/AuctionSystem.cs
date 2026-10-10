@@ -107,6 +107,24 @@ public static class AuctionSystem
     }
 
     /// <summary>
+    /// The pending-sales list the client asks for when the auction house opens. A server without
+    /// the request (before 3.0.2) has no pending sales to report, so the client gets the empty answer.
+    /// </summary>
+    [HandlesCmsg(Opcode.CMSG_AUCTION_LIST_PENDING_SALES)]
+    public static void HandleAuctionListPendingSales(in EmptyClientPacket request, in SessionContext ctx)
+    {
+        if (LegacyVersion.GetCurrentOpcode(Opcode.CMSG_AUCTION_LIST_PENDING_SALES) == 0)
+        {
+            ctx.SendPacket(new AuctionListPendingSalesResult());
+            return;
+        }
+
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_AUCTION_LIST_PENDING_SALES);
+        packet.WriteGuid(ctx.GetSession().GameState.CurrentInteractedWithNPC.To64());
+        ctx.SendPacketToServer(packet);
+    }
+
+    /// <summary>
     /// A page request of a full scan (Auctionator's, or the default UI's). See <see cref="AuctionReplicate"/>.
     /// </summary>
     [HandlesCmsg(Opcode.CMSG_AUCTION_REPLICATE_ITEMS)]

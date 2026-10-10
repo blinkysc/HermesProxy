@@ -1,4 +1,5 @@
 ﻿using HermesProxy.Enums;
+using Framework.Logging;
 using HermesProxy.World.Dispatch;
 using HermesProxy.World.Enums;
 using HermesProxy.World.Objects;
@@ -147,6 +148,21 @@ public partial class WorldClient
         var replicate = new Server.Systems.AuctionReplicate(auctions, Environment.TickCount64, desiredDelay);
         session.AuctionReplicates[session.GameState.CurrentPlayerGuid] = replicate;
         SendPacketToClient(replicate.Page(pending.Cursor, pending.Count));
+    }
+
+    /// <remarks>
+    /// A 3.3.5a pending sale is a subject, a body, a money amount and a time; the 3.4.3 answer
+    /// lists full mail entries, which those do not make. AzerothCore and cMaNGOS both answer with
+    /// no entries anyway (each has the count hard-wired to 0), so the answer is the empty list;
+    /// entries from a server that does send them are reported, not invented.
+    /// </remarks>
+    [HandlesSmsg(Opcode.SMSG_AUCTION_LIST_PENDING_SALES)]
+    internal void HandleAuctionListPendingSales(WorldPacket packet)
+    {
+        uint count = packet.ReadUInt32();
+        if (count != 0)
+            Log.Print(LogType.Warn, $"SMSG_AUCTION_LIST_PENDING_SALES: {count} pending sales from the server have no 3.4.3 form and were left out.");
+        SendPacketToClient(new AuctionListPendingSalesResult());
     }
 
     [HandlesSmsg(Opcode.SMSG_AUCTION_COMMAND_RESULT)]

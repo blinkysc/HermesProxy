@@ -138,6 +138,23 @@ public class AuctionListItemsResult : ServerPacket
     public bool OnlyUsable;
 }
 
+/// <summary>
+/// The auction house's pending sales (won auctions whose money is still on its way by mail).
+/// Always empty here: see AuctionHandler.HandleAuctionListPendingSales.
+/// </summary>
+public class AuctionListPendingSalesResult : ServerPacket
+{
+    public AuctionListPendingSalesResult() : base(Opcode.SMSG_AUCTION_LIST_PENDING_SALES_RESULT) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(0); // MailsCount
+        _worldPacket.WriteInt32(TotalNumRecords);
+    }
+
+    public int TotalNumRecords;
+}
+
 /// <summary>A page of a full scan, laid out as TrinityCore's AuctionReplicateResponse::Write.</summary>
 public class AuctionReplicateResponse : ServerPacket
 {
