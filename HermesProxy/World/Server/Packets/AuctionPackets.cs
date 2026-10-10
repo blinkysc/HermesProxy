@@ -83,6 +83,10 @@ public readonly record struct AuctionListItems(
 
 public readonly record struct AuctionSort(byte Type, byte Direction);
 
+/// <summary>A page request of a full scan. See <see cref="Systems.AuctionReplicate"/>.</summary>
+public readonly record struct AuctionReplicateItems(
+    WowGuid128 Auctioneer, uint ChangeNumberGlobal, uint ChangeNumberCursor, uint ChangeNumberTombstone, uint Count);
+
 public readonly record struct ClassFilter(int ItemClass, List<SubClassFilter> SubClassFilters);
 
 /// <remarks>
@@ -132,6 +136,31 @@ public class AuctionListItemsResult : ServerPacket
     public int TotalItemsCount;
     public uint DesiredDelay = 300;
     public bool OnlyUsable;
+}
+
+/// <summary>A page of a full scan, laid out as TrinityCore's AuctionReplicateResponse::Write.</summary>
+public class AuctionReplicateResponse : ServerPacket
+{
+    public AuctionReplicateResponse() : base(Opcode.SMSG_AUCTION_REPLICATE_RESPONSE) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteUInt32(Result);
+        _worldPacket.WriteUInt32(DesiredDelay);
+        _worldPacket.WriteUInt32(ChangeNumberGlobal);
+        _worldPacket.WriteUInt32(ChangeNumberCursor);
+        _worldPacket.WriteUInt32(ChangeNumberTombstone);
+        _worldPacket.WriteInt32(Items.Count);
+        foreach (AuctionItem item in Items)
+            item.Write(_worldPacket);
+    }
+
+    public uint Result;
+    public uint DesiredDelay;
+    public uint ChangeNumberGlobal;
+    public uint ChangeNumberCursor;
+    public uint ChangeNumberTombstone;
+    public List<AuctionItem> Items = new();
 }
 
 public class AuctionItem

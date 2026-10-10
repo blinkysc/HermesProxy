@@ -918,6 +918,11 @@ public sealed class GameSessionData
     }
 
     public PendingEnchantmentLogData PendingEnchantmentLog;
+    // What each CMSG_AUCTION_LIST_ITEMS sent and not yet answered was for, oldest first: null for
+    // a search, the scan for a full scan's whole-house query. The server answers list queries in
+    // the order it got them (AzerothCore's default single auction worker thread), so the answer
+    // goes to the oldest entry.
+    public readonly Queue<HermesProxy.World.Server.Systems.PendingAuctionReplicate?> PendingAuctionLists = new();
 
     public uint GetItemId(WowGuid128 guid)
     {
@@ -2282,6 +2287,9 @@ public class GlobalSessionData
     public WorldSocket InstanceSocket = null!;
     public AuthClient AuthClient = null!;
     public WorldClient? WorldClient;
+    // Full auction-house scans by character: cooldown and paging state, kept across a relog as the
+    // server keeps its own. See World.Server.Systems.AuctionReplicate.
+    public readonly Dictionary<WowGuid128, World.Server.Systems.AuctionReplicate> AuctionReplicates = new();
     public SniffFile ModernSniff = null!;
     // Sniff of the cMangos↔HermesProxy legacy stream. Created lazily by WorldClient
     // on the first incoming SMSG once decryption is established. Used to capture an

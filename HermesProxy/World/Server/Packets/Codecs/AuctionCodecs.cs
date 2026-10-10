@@ -42,6 +42,43 @@ public static class AuctionListBidderItemsCodec
     }
 }
 
+/// <summary>
+/// Consumes an AddOnInfo (TaintedBy) body to stay aligned; the proxy never forwards it.
+/// </summary>
+internal static class AddOnInfoReader
+{
+    public static void Skip(ref SpanPacketReader r)
+    {
+        r.ResetBitReader();
+        uint addonNameLen = r.ReadBits<uint>(10);
+        uint addonVerLen = r.ReadBits<uint>(10);
+        r.HasBit(); // Loaded
+        r.HasBit(); // Disabled
+        if (addonNameLen > 1) { r.ReadString(addonNameLen - 1); r.ReadUInt8(); }
+        if (addonVerLen > 1) { r.ReadString(addonVerLen - 1); r.ReadUInt8(); }
+    }
+}
+
+/// <remarks>
+/// Wire per TrinityCore's AuctionReplicateItems::Read; WowPacketParser and TrinityCore retail have
+/// the same layout.
+/// </remarks>
+public static class AuctionReplicateItemsCodec
+{
+    public static void Read(ref SpanPacketReader r, out AuctionReplicateItems packet)
+    {
+        WowGuid128 auctioneer = r.ReadPackedGuid128();
+        uint global = r.ReadUInt32();
+        uint cursor = r.ReadUInt32();
+        uint tombstone = r.ReadUInt32();
+        uint count = r.ReadUInt32();
+        if (r.HasBit())
+            AddOnInfoReader.Skip(ref r);
+
+        packet = new AuctionReplicateItems(auctioneer, global, cursor, tombstone, count);
+    }
+}
+
 // ---- AuctionListItems: the ranged pair ----
 
 [PacketCodec(typeof(AuctionListItems), AddedIn = ClientVersionBuild.V3_4_3_54261)]
@@ -77,16 +114,7 @@ public static class AuctionListItemsCodecWotLKClassic
         bool exactMatch = r.HasBit();
 
         if (tainted)
-        {
-            // Consume the AddOnInfo (TaintedBy) body to stay aligned; not forwarded.
-            r.ResetBitReader();
-            uint addonNameLen = r.ReadBits<uint>(10);
-            uint addonVerLen = r.ReadBits<uint>(10);
-            r.HasBit(); // Loaded
-            r.HasBit(); // Disabled
-            if (addonNameLen > 1) { r.ReadString(addonNameLen - 1); r.ReadUInt8(); }
-            if (addonVerLen > 1) { r.ReadString(addonVerLen - 1); r.ReadUInt8(); }
-        }
+            AddOnInfoReader.Skip(ref r);
 
         var classFilters = new List<ClassFilter>((int)itemClassFilterCount);
         for (uint i = 0; i < itemClassFilterCount; ++i)

@@ -106,6 +106,15 @@ public partial class WorldClient
     [HandlesSmsg(Opcode.SMSG_AUCTION_LIST_ITEMS_RESULT)]
     internal void HandleAuctionListItemsResult(WorldPacket packet)
     {
+        // The whole-house query a full scan sent (AuctionSystem.HandleAuctionReplicateItems): its
+        // answer is the scan's snapshot, paged to the client, not a search result.
+        GetSession().GameState.PendingAuctionLists.TryDequeue(out var pending);
+        if (pending != null)
+        {
+            HandleAuctionReplicateSnapshot(packet, pending);
+            return;
+        }
+
         AuctionListItemsResult auction = new AuctionListItemsResult();
         uint count = packet.ReadUInt32();
         for (uint i = 0; i < count; i++)
@@ -118,6 +127,26 @@ public partial class WorldClient
         if (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_3_0_7561))
             auction.DesiredDelay = packet.ReadUInt32();
         SendPacketToClient(auction);
+    }
+
+    void HandleAuctionReplicateSnapshot(WorldPacket packet, Server.Systems.PendingAuctionReplicate pending)
+    {
+        uint count = packet.ReadUInt32();
+        var auctions = new List<AuctionItem>((int)Math.Min(count, 55000u));
+        for (uint i = 0; i < count; i++)
+        {
+            AuctionItem item = ReadAuctionItem(packet);
+            item.CensorServerSideInfo = true;
+            auctions.Add(item);
+        }
+        packet.ReadInt32(); // total count
+        // TrinityCore asks the client to wait five search delays between pages.
+        uint desiredDelay = (LegacyVersion.AddedInVersion(ClientVersionBuild.V2_3_0_7561) ? packet.ReadUInt32() : 300) * 5;
+
+        var session = GetSession();
+        var replicate = new Server.Systems.AuctionReplicate(auctions, Environment.TickCount64, desiredDelay);
+        session.AuctionReplicates[session.GameState.CurrentPlayerGuid] = replicate;
+        SendPacketToClient(replicate.Page(pending.Cursor, pending.Count));
     }
 
     [HandlesSmsg(Opcode.SMSG_AUCTION_COMMAND_RESULT)]

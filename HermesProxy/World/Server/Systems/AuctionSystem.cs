@@ -1,3 +1,4 @@
+using System;
 using Framework.Logging;
 using HermesProxy.Enums;
 using HermesProxy.World.Dispatch;
@@ -101,7 +102,58 @@ public static class AuctionSystem
             }
         }
 
+        ctx.GetSession().GameState.PendingAuctionLists.Enqueue(null);
         ctx.SendPacketToServer(packet);
+    }
+
+    /// <summary>
+    /// A page request of a full scan (Auctionator's, or the default UI's). See <see cref="AuctionReplicate"/>.
+    /// </summary>
+    [HandlesCmsg(Opcode.CMSG_AUCTION_REPLICATE_ITEMS)]
+    public static void HandleAuctionReplicateItems(in AuctionReplicateItems request, in SessionContext ctx)
+    {
+        var session = ctx.GetSession();
+        var player = session.GameState.CurrentPlayerGuid;
+        long now = Environment.TickCount64;
+
+        if (session.AuctionReplicates.TryGetValue(player, out var replicate) && replicate.Expired(now))
+        {
+            session.AuctionReplicates.Remove(player);
+            replicate = null;
+        }
+
+        if (replicate != null)
+        {
+            ctx.SendPacket(replicate.Answer(request.ChangeNumberGlobal, request.ChangeNumberCursor,
+                request.ChangeNumberTombstone, request.Count, now));
+            return;
+        }
+
+        // A new scan: ask for the whole house. The answer arrives as an ordinary list result
+        // (AuctionHandler.HandleAuctionListItemsResult). The cooldown starts with it, not here: the
+        // server answers nothing when the auctioneer is out of reach, and the next scan asks again.
+        var pending = new PendingAuctionReplicate(request.Auctioneer, request.ChangeNumberCursor, request.Count);
+        session.GameState.PendingAuctionLists.Enqueue(pending);
+        ctx.SendPacketToServer(BuildListAllAuctions(request.Auctioneer));
+    }
+
+    /// <summary>The 3.3.5a whole-house query: CMSG_AUCTION_LIST_ITEMS with no filters and getAll set.</summary>
+    static WorldPacket BuildListAllAuctions(WowGuid128 auctioneer)
+    {
+        WorldPacket packet = new WorldPacket(Opcode.CMSG_AUCTION_LIST_ITEMS);
+        packet.WriteGuid(auctioneer.To64());
+        packet.WriteUInt32(0);   // list from
+        packet.WriteCString("");  // name
+        packet.WriteUInt8(0);    // min level
+        packet.WriteUInt8(0);    // max level
+        packet.WriteInt32(-1);   // inventory slot
+        packet.WriteInt32(-1);   // item class
+        packet.WriteInt32(-1);   // item subclass
+        packet.WriteInt32(-1);   // quality
+        packet.WriteBool(false); // usable only
+        packet.WriteBool(true);  // getAll
+        packet.WriteUInt8(0);    // sort count
+        return packet;
     }
 
     /// <remarks>

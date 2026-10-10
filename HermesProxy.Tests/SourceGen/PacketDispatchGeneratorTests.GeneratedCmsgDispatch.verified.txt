@@ -220,6 +220,12 @@ internal static unsafe class GeneratedCmsgDispatch
         global::HermesProxy.World.Server.Systems.AuctionSystem.HandleAuctionRemoveItem(in packet, in ctx);
     }
 
+    private static void Thunk_HermesProxy_World_Server_Systems_AuctionSystem_HandleAuctionReplicateItems_CMSG_AUCTION_REPLICATE_ITEMS(ref global::Framework.IO.SpanPacketReader reader, in global::HermesProxy.World.Dispatch.SessionContext ctx)
+    {
+        global::HermesProxy.World.Server.Packets.AuctionReplicateItemsCodec.Read(ref reader, out var packet);
+        global::HermesProxy.World.Server.Systems.AuctionSystem.HandleAuctionReplicateItems(in packet, in ctx);
+    }
+
     private static void Thunk_HermesProxy_World_Server_Systems_AuctionSystem_HandleAuctionSellItem_CMSG_AUCTION_SELL_ITEM(ref global::Framework.IO.SpanPacketReader reader, in global::HermesProxy.World.Dispatch.SessionContext ctx)
     {
         global::HermesProxy.World.Server.Packets.AuctionSellItemCodec.Read(ref reader, out var packet);
@@ -2889,6 +2895,7 @@ internal static unsafe class GeneratedCmsgDispatch
         table[(int)global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_LIST_OWNED_ITEMS] = &Thunk_HermesProxy_World_Server_Systems_AuctionSystem_HandleAuctionListOwnerItems_CMSG_AUCTION_LIST_OWNED_ITEMS;
         table[(int)global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_PLACE_BID] = &Thunk_HermesProxy_World_Server_Systems_AuctionSystem_HandleAuctionPlaceBId_CMSG_AUCTION_PLACE_BID;
         table[(int)global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_REMOVE_ITEM] = &Thunk_HermesProxy_World_Server_Systems_AuctionSystem_HandleAuctionRemoveItem_CMSG_AUCTION_REMOVE_ITEM;
+        table[(int)global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_REPLICATE_ITEMS] = &Thunk_HermesProxy_World_Server_Systems_AuctionSystem_HandleAuctionReplicateItems_CMSG_AUCTION_REPLICATE_ITEMS;
         table[(int)global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_SELL_ITEM] = &Thunk_HermesProxy_World_Server_Systems_AuctionSystem_HandleAuctionSellItem_CMSG_AUCTION_SELL_ITEM;
         table[(int)global::HermesProxy.World.Enums.Opcode.CMSG_AUTOBANK_ITEM] = &Thunk_HermesProxy_World_Server_Systems_ItemSystem_HandleAutoEquipItem_CMSG_AUTOBANK_ITEM;
         table[(int)global::HermesProxy.World.Enums.Opcode.CMSG_AUTOSTORE_BANK_ITEM] = &Thunk_HermesProxy_World_Server_Systems_ItemSystem_HandleAutoEquipItem_CMSG_AUTOSTORE_BANK_ITEM;
@@ -3488,6 +3495,7 @@ internal static unsafe class GeneratedCmsgDispatch
             global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_LIST_OWNED_ITEMS,
             global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_PLACE_BID,
             global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_REMOVE_ITEM,
+            global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_REPLICATE_ITEMS,
             global::HermesProxy.World.Enums.Opcode.CMSG_AUCTION_SELL_ITEM,
             global::HermesProxy.World.Enums.Opcode.CMSG_AUTOBANK_ITEM,
             global::HermesProxy.World.Enums.Opcode.CMSG_AUTOSTORE_BANK_ITEM,
