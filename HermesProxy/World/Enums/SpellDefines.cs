@@ -78,7 +78,7 @@ public enum CastFlag : uint
     HasTrajectory  = 0x00000002,
     Unknown2       = 0x00000004,
     Unknown3       = 0x00000008,
-    Unknown4       = 0x00000010,
+    CastItem       = 0x00000010, // modern: the cast comes from an item the caster used or carries
     Projectile     = 0x00000020,
     Unknown5       = 0x00000040,
     Unknown6       = 0x00000080,

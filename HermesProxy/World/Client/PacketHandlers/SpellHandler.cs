@@ -719,6 +719,35 @@ public partial class WorldClient
             cast.CastFlags &= ~(uint)CastFlag.HasTrajectory;
     }
 
+    /// <summary>
+    /// Whether a cast needs <see cref="CastFlag.CastItem"/>. Retail 3.4 sets it on the start
+    /// and go of every cast an item makes, used or proc'd, except the passive spells an item
+    /// casts by being worn or carried (Alchemist's Stone, Haunted Memento). 3.3.5a has no such
+    /// flag. Without it the 3.4.3 client never closes its own item cast on the go: the cast
+    /// stays open with its precast visual on (Rune of Command's glowing hands) until something
+    /// cancels it, such as the item leaving the bags.
+    /// </summary>
+    bool IsUsedItemCast(WowGuid128 caster, uint legacySpellId)
+        => ModernVersion.Build == ClientVersionBuild.V3_4_3_54261 && caster.IsItem() &&
+           IsUsedItemSpell(GameData.GetItemTemplate(GetSession().GameState.GetItemId(caster)), legacySpellId);
+
+    /// <summary>Whether the item casts this spell other than passively. An item not queried yet counts as used.</summary>
+    internal static bool IsUsedItemSpell(ItemTemplate? template, uint legacySpellId)
+    {
+        if (template == null)
+            return true;
+
+        for (int i = 0; i < template.TriggeredSpellIds.Length; i++)
+        {
+            if (template.TriggeredSpellIds[i] != (int)legacySpellId)
+                continue;
+            // ITEM_SPELLTRIGGER_ON_EQUIP = 1, ITEM_SPELLTRIGGER_ON_NO_DELAY_USE = 5 (carried).
+            int trigger = template.TriggeredSpellTypes[i];
+            return trigger != 1 && trigger != 5;
+        }
+        return true;
+    }
+
     SpellCastData HandleSpellStartOrGo(WorldPacket packet, bool isSpellGo)
     {
         SpellCastData dbdata = new SpellCastData();
@@ -749,6 +778,8 @@ public partial class WorldClient
         else
             flags = packet.ReadUInt16();
         dbdata.CastFlags = flags;
+        if (IsUsedItemCast(dbdata.CasterGUID, (uint)dbdata.SpellID))
+            dbdata.CastFlags |= (uint)CastFlag.CastItem;
 
         if (!isSpellGo || LegacyVersion.AddedInVersion(ClientVersionBuild.V2_0_1_6180))
             dbdata.CastTime = packet.ReadUInt32();
