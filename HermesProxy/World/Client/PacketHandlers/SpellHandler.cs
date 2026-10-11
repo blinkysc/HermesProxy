@@ -709,11 +709,6 @@ public partial class WorldClient
         if (ModernVersion.Build != ClientVersionBuild.V3_4_3_54261)
             return;
 
-        if (IsRequestedCast(cast.CasterGUID, cast.CastFlags, (uint)cast.SpellID))
-            cast.CastFlags |= (uint)CastFlag.NoGcd;
-        else
-            cast.CastFlags &= ~(uint)CastFlag.NoGcd;
-
         if (GameData.IsMissileSpellVisual(cast.SpellXSpellVisualID))
         {
             cast.CastFlags &= ~(uint)CastFlag.HasTrajectory;
@@ -723,25 +718,6 @@ public partial class WorldClient
         if (isSpellGo)
             cast.CastFlags &= ~(uint)CastFlag.HasTrajectory;
     }
-
-    /// <summary>
-    /// Whether a cast goes out with <see cref="CastFlag.NoGcd"/>, which on 3.4 marks a cast a
-    /// player asked for rather than the global cooldown it names on 3.3.5a. Retail 3.4.0 sets it
-    /// on the start and go of a player's or item's own casts (Shadow Bolt, Hearthstone), and never
-    /// on a triggered spell, an auto-repeat shot, or a creature's or pet's cast. AzerothCore sets
-    /// it on any spell without a global cooldown, so procs (Vengeance, The Art of War) and NPC
-    /// buffs (Thrall's Warchief's Blessing) went out flagged and their visuals stayed on, while
-    /// Crusader Strike went out without it.
-    /// </summary>
-    /// <remarks>
-    /// The legacy server marks a triggered cast with <see cref="CastFlag.PendingCast"/>. Retail
-    /// also flags the first shot of an auto-repeat and a few spells a requested cast triggers
-    /// (Frost Fever from Icy Touch), which the legacy packets cannot tell apart.
-    /// </remarks>
-    internal static bool IsRequestedCast(WowGuid128 caster, uint castFlags, uint spellId)
-        => (caster.IsPlayer() || caster.IsItem()) &&
-           (castFlags & (uint)CastFlag.PendingCast) == 0 &&
-           !GameData.AutoRepeatSpells.Contains(spellId);
 
     /// <summary>
     /// Whether a cast needs <see cref="CastFlag.CastItem"/>. Retail 3.4 sets it on the start

@@ -92,7 +92,7 @@ public enum CastFlag : uint
     Unknown13      = 0x00008000,
     Unknown14      = 0x00010000,
     AdjustMissile  = 0x00020000, // 4.x
-    NoGcd          = 0x00040000, // modern: the cast is one a player asked for, see WorldClient.IsRequestedCast
+    NoGcd          = 0x00040000,
     VisualChain    = 0x00080000, // 4.x
     Unknown18      = 0x00100000,
     RuneInfo       = 0x00200000, // 4.x PredictedRunes
