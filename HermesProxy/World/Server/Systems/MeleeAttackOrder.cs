@@ -59,6 +59,10 @@ internal static class MeleeAttackOrder
         {
             state.CurrentAttackTarget = default;
             toServer.Send(new WorldPacket(Opcode.CMSG_ATTACK_STOP));
+            // Past the stop no swing is left to wait for. A swing the server ignores (AzerothCore's
+            // Unit::Attack returns quietly while mounted or at a dead target) is never answered, and
+            // left closed the gate held every later stop for the full timeout.
+            toServer.SetGate(OutboxGate.SwingAnswered, open: true);
         }, HeldStopHold);
     }
 

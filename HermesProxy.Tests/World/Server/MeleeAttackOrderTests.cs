@@ -122,6 +122,22 @@ public class MeleeAttackOrderTests
     }
 
     [Fact]
+    public void ServerThatNeverAnswers_LaterStopsAreNotHeldAgain()
+    {
+        // AzerothCore ignored a swing made while mounted; every stop for minutes after waited 2 s.
+        var s = new Session();
+        MeleeAttackOrder.Swing(s.State, s.ToServer, Wolf);
+        MeleeAttackOrder.Stop(s.State, s.ToServer);
+        s.Time.Advance(MeleeAttackOrder.HeldStopTimeout);
+        s.ToServer.Tick();
+
+        MeleeAttackOrder.Stop(s.State, s.ToServer);
+
+        Assert.Equal([SwingOpcode, StopOpcode, StopOpcode], s.Sent);
+        Assert.Equal(0, s.ToServer.PendingCount);
+    }
+
+    [Fact]
     public void SwingError_IsAnAnswerToo_AndReleasesTheHeldStop()
     {
         var s = new Session();
