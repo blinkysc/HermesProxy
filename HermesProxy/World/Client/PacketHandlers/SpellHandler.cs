@@ -1660,15 +1660,13 @@ public partial class WorldClient
             return;
         }
 
+        uint legacySpellId = spellId; // as the cast that applied it was named
         // Before the visual lookup below, so the client also gets the remapped spell's visual.
         spellId = AuraSpellRemap.ToModern(spellId);
 
         AuraDataInfo data = new AuraDataInfo
         {
             SpellID = spellId,
-            CastID = WowGuid128.Create(HighGuidType703.Cast, SpellCastSource.Aura,
-                                       (uint)(GetSession().GameState.CurrentMapId ?? 0u),
-                                       spellId, guid.GetCounter()),
             SpellXSpellVisualID = GameData.GetSpellVisual(spellId),
         };
 
@@ -1699,6 +1697,7 @@ public partial class WorldClient
         data.CastUnit = legacyFlags.HasAnyFlag(AuraFlagsWotLK.NoCaster)
             ? guid
             : packet.ReadPackedGuid().To128(GetSession().GameState);
+        data.CastID = AuraCastId(guid, slot, legacySpellId, spellId, data.CastUnit);
 
         // Cancelable: V3_4_3 client requires this flag for right-click-buff and the
         // CancelShapeshiftForm() Lua path (i.e. `/cancelform`, stance-bar toggle, and
@@ -1733,6 +1732,28 @@ public partial class WorldClient
 
         aura.AuraData = data;
         update.Auras.Add(aura);
+    }
+
+    /// <summary>
+    /// The cast id an aura goes out with: the one of the cast that applied it.
+    /// </summary>
+    /// <remarks>
+    /// A native server gives an aura its applying spell's cast id (retail 3.4.0: the aura entries
+    /// carry the CastID of the SPELL_GO before them), and the client ties the cast's visuals to the
+    /// aura through it. A legacy aura names no cast, so this takes the latest finished cast of the
+    /// spell by the aura's caster. An aura updated in place (stacks, refresh) keeps the id it was
+    /// applied with, and one with no cast seen falls back to an id of its own.
+    /// </remarks>
+    WowGuid128 AuraCastId(WowGuid128 target, byte slot, uint legacySpellId, uint spellId, WowGuid128 caster)
+    {
+        var gameState = GetSession().GameState;
+        if (gameState.KnownAuras.TryGetValue(target, out var slots) &&
+            slots.TryGetValue(slot, out var known) && known.AuraData?.SpellID == spellId)
+            return known.AuraData.CastID;
+        if (gameState.TryGetFinishedCast(caster, legacySpellId, out var castId))
+            return castId;
+        return WowGuid128.Create(HighGuidType703.Cast, SpellCastSource.Aura,
+                                 (uint)(gameState.CurrentMapId ?? 0u), spellId, target.GetCounter());
     }
 
     // Legacy 3.3.5a SMSG_HEALTH_UPDATE wire format: PackedGuid + uint32 health.

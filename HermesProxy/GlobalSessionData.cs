@@ -708,6 +708,10 @@ public sealed class GameSessionData
     public void NoteFinishedCast(WowGuid128 caster, uint spellId, WowGuid128 castId)
         => _lastSyntheticCasts[(caster, spellId)] = castId;
 
+    /// <summary>The id the latest finished cast of this spell by this caster went out with.</summary>
+    public bool TryGetFinishedCast(WowGuid128 caster, uint spellId, out WowGuid128 castId)
+        => _lastSyntheticCasts.TryGetValue((caster, spellId), out castId);
+
     /// <summary>
     /// The cast an interruption or a damage log refers to: the open one, else the latest. The
     /// server reports an interruption twice (SPELL_FAILURE and SPELL_FAILED_OTHER), so both
