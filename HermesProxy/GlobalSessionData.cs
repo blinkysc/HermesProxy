@@ -713,9 +713,23 @@ public sealed class GameSessionData
         => _lastSyntheticCasts.TryGetValue((caster, spellId), out castId);
 
     /// <summary>
-    /// The cast an interruption or a damage log refers to: the open one, else the latest. The
-    /// server reports an interruption twice (SPELL_FAILURE and SPELL_FAILED_OTHER), so both
-    /// have to resolve to the same cast.
+    /// The cast a damage log reports: the latest finished one. A log follows its cast's go, and a
+    /// missile can land after the caster has started its next cast, which has to stay open for its
+    /// own go: taking it here gave that go a new id, so the client never ended the cast and kept
+    /// its precast visual on (Thrall's Lava Burst, fire on his hands).
+    /// </summary>
+    public WowGuid128 FinishedSyntheticCast(WowGuid128 caster, uint spellId)
+    {
+        var key = (caster, spellId);
+        if (_lastSyntheticCasts.TryGetValue(key, out var castId))
+            return castId;
+        return _lastSyntheticCasts[key] = NewSyntheticCastId(spellId);
+    }
+
+    /// <summary>
+    /// The cast an interruption refers to: the open one, else the latest. The server reports an
+    /// interruption twice (SPELL_FAILURE and SPELL_FAILED_OTHER), so both have to resolve to the
+    /// same cast.
     /// </summary>
     public WowGuid128 CurrentSyntheticCast(WowGuid128 caster, uint spellId)
     {

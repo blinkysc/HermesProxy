@@ -1118,7 +1118,7 @@ public partial class WorldClient
         spell.CasterGUID = packet.ReadPackedGuid().To128(GetSession().GameState);
         spell.SpellID = packet.ReadUInt32();
         spell.SpellXSpellVisualID = GameData.GetSpellVisual(spell.SpellID);
-        spell.CastID = GetSession().GameState.CurrentSyntheticCast(spell.CasterGUID, spell.SpellID);
+        spell.CastID = GetSession().GameState.FinishedSyntheticCast(spell.CasterGUID, spell.SpellID);
         spell.Damage = packet.ReadInt32();
         spell.OriginalDamage = spell.Damage;
 
