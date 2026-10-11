@@ -69,6 +69,8 @@ internal static class SplineFlagTranslation
     /// Casting by name misses every flag that was renamed (Trajectory is Parabolic, Knockback is
     /// OrientationFixed, AnimationTier is Animation, OrientationInverted is Backward) and maps the
     /// WotLK <c>Animation</c> bit, which is something else, onto the modern one.
+    /// <c>WalkMode</c> has no modern bit: walking is a movement flag there, and modern
+    /// <c>CanSwim</c> comes from the unit (<see cref="SwimFlag"/>).
     /// </remarks>
     internal static SplineFlagModern ToModern(SplineFlagWotLK flags)
     {
@@ -78,7 +80,6 @@ internal static class SplineFlagTranslation
         if ((flags & SplineFlagWotLK.Falling) != 0) result |= SplineFlagModern.Falling;
         if ((flags & SplineFlagWotLK.NoSpline) != 0) result |= SplineFlagModern.NoSpline;
         if ((flags & SplineFlagWotLK.Trajectory) != 0) result |= SplineFlagModern.Parabolic;
-        if ((flags & SplineFlagWotLK.WalkMode) != 0) result |= SplineFlagModern.CanSwim;
         if ((flags & SplineFlagWotLK.Flying) != 0) result |= SplineFlagModern.Flying;
         if ((flags & SplineFlagWotLK.Knockback) != 0) result |= SplineFlagModern.OrientationFixed;
         if ((flags & SplineFlagWotLK.CatmullRom) != 0) result |= SplineFlagModern.CatmullRom;
@@ -93,6 +94,25 @@ internal static class SplineFlagTranslation
         if ((flags & SplineFlagWotLK.UncompressedPath) != 0) result |= SplineFlagModern.UncompressedPath;
         if ((flags & SplineFlagWotLK.Unknown10) != 0) result |= SplineFlagModern.Unknown10;
         return result;
+    }
+
+    /// <summary>
+    /// Modern <c>CanSwim</c> for a move of a unit with these legacy unit flags.
+    /// </summary>
+    /// <remarks>
+    /// A native server sets it on every move from the unit itself: TrinityCore
+    /// <c>MoveSplineInit</c> has <c>args.flags.CanSwim = unit->CanSwim()</c>, and retail 3.4.0
+    /// Lagoon Eels (UNIT_FLAG_CAN_SWIM) moved with it on every random move. A 3.3.5a spline has no
+    /// such bit, so without this a swimming creature reached the client as one that cannot swim.
+    /// The checks are <c>Unit::CanSwim</c>'s, less the flags2 one 3.3.5a does not have.
+    /// </remarks>
+    internal static SplineFlagModern SwimFlag(UnitFlags unitFlags)
+    {
+        if ((unitFlags & UnitFlags.CannotSwim) != 0)
+            return SplineFlagModern.None;
+        if ((unitFlags & (UnitFlags.PlayerControlled | UnitFlags.PetInCombat | UnitFlags.Rename | UnitFlags.CanSwim)) != 0)
+            return SplineFlagModern.CanSwim;
+        return SplineFlagModern.None;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

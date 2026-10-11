@@ -880,7 +880,8 @@ public partial class WorldClient
             takesSeat = splineFlags.HasAnyFlag(SplineFlagWotLK.TransportEnter);
             leavesSeat = splineFlags.HasAnyFlag(SplineFlagWotLK.TransportExit);
             moveSpline.SplineFlags = SplineFlagTranslation.ToModern(splineFlags)
-                                     | SplineFlagTranslation.SeatMoveFlags(splineFlags);
+                                     | SplineFlagTranslation.SeatMoveFlags(splineFlags)
+                                     | SplineFlagTranslation.SwimFlag((UnitFlags)GetSession().GameState.GetLegacyFieldValueUInt32(guid, UnitField.UNIT_FIELD_FLAGS));
         }
 
         // Kept for the modern spline's own anim tier and jump blocks (MonsterMove.Write); dropped,

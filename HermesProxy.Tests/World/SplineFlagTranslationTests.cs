@@ -122,4 +122,34 @@ public class SplineFlagTranslationTests
         const SplineFlagModern afterFix = sniffedBeforeFix | SplineFlagModern.CatmullRom;
         Assert.Equal(4196864u, (uint)afterFix);
     }
+
+    // Retail 3.4.0 Lagoon Eel (UNIT_FLAG_CAN_SWIM, 0x8000): every random move carried CanSwim.
+    // AzerothCore sends the same moves with no spline flags at all.
+    [Theory]
+    [InlineData(UnitFlags.CanSwim)]
+    [InlineData(UnitFlags.PlayerControlled)]
+    [InlineData(UnitFlags.PetInCombat)]
+    [InlineData(UnitFlags.Rename)]
+    public void SwimFlag_UnitsThatCanSwim_GetCanSwim(UnitFlags unitFlags)
+    {
+        Assert.Equal(SplineFlagModern.CanSwim, SplineFlagTranslation.SwimFlag(unitFlags));
+    }
+
+    [Theory]
+    [InlineData(UnitFlags.None)]
+    [InlineData(UnitFlags.InCombat)]
+    [InlineData(UnitFlags.CannotSwim | UnitFlags.CanSwim)]
+    [InlineData(UnitFlags.CannotSwim | UnitFlags.PlayerControlled)]
+    public void SwimFlag_UnitsThatCannotSwim_GetNone(UnitFlags unitFlags)
+    {
+        Assert.Equal(SplineFlagModern.None, SplineFlagTranslation.SwimFlag(unitFlags));
+    }
+
+    // Walking has no modern spline bit; it used to come out as CanSwim, which a walking unit that
+    // cannot swim must not get.
+    [Fact]
+    public void ToModern_WalkMode_DoesNotBecomeCanSwim()
+    {
+        Assert.Equal(SplineFlagModern.None, SplineFlagTranslation.ToModern(SplineFlagWotLK.WalkMode));
+    }
 }
