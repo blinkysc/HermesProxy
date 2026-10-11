@@ -492,6 +492,27 @@ public class OutboxTimeTests
 
         Assert.Equal(Environment.CurrentManagedThreadId, runOn);
     }
+
+    [Fact]
+    public void DeadlineContinuation_WithAnOwner_RunsOnTimeWithoutTick()
+    {
+        // The queued cast's release (SpellSystem.ScheduleHeldCastRelease) waited for the next
+        // legacy packet to pump Tick, holding the cast past the global cooldown it waited for.
+        var time = new FakeTimeProvider();
+        var outbox = new ServerOutbox(new RecordingServerWire(), time);
+        using var owner = new HermesProxy.World.Session.SessionExecutor("test");
+        outbox.RunDeadlinesOn(owner);
+        int runs = 0;
+
+        owner.Post(_ => outbox.Delay(TimeSpan.FromMilliseconds(100), () => runs++));
+        time.Advance(TimeSpan.FromMilliseconds(99));
+        Assert.Equal(0, runs);
+
+        time.Advance(TimeSpan.FromMilliseconds(1));
+
+        Assert.Equal(1, runs);
+        Assert.Equal(0, outbox.PendingCount);
+    }
 }
 
 public class OutboxLifetimeTests

@@ -903,11 +903,14 @@ public abstract class PacketOutbox<TPacket> : IDisposable where TPacket : class
     {
         long timerDue = long.MaxValue;
         long tickDue = long.MaxValue;
+        // With an owner the timer posts its deadlines there, so it can act on every hold; without
+        // one it may only act on holds that read no session state, and Tick does the rest.
+        bool timerRunsAll = _owner != null;
         foreach (var hold in _holds)
         {
             if (hold.Done)
                 continue;
-            if (hold.RunsOnTimer)
+            if (hold.RunsOnTimer || timerRunsAll)
                 timerDue = Math.Min(timerDue, hold.Deadline);
             else
                 tickDue = Math.Min(tickDue, hold.Deadline);
