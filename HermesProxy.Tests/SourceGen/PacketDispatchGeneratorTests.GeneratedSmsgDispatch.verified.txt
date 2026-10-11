@@ -1838,6 +1838,11 @@ internal static unsafe class GeneratedSmsgDispatch
         client.HandlePetCastFailedTBC(packet);
     }
 
+    private static void Thunk_HermesProxy_World_Client_WorldClient_HandlePetDismissSound_SMSG_PET_DISMISS_SOUND(global::HermesProxy.World.Client.WorldClient client, global::HermesProxy.World.WorldPacket packet)
+    {
+        client.HandlePetDismissSound(packet);
+    }
+
     private static void Thunk_HermesProxy_World_Client_WorldClient_HandlePetLearnedSpells_SMSG_PET_LEARNED_SPELLS(global::HermesProxy.World.Client.WorldClient client, global::HermesProxy.World.WorldPacket packet)
     {
         client.HandlePetLearnedSpells(packet);
@@ -2946,6 +2951,7 @@ internal static unsafe class GeneratedSmsgDispatch
             else if (global::HermesProxy.LegacyVersion.AddedInVersion(global::HermesProxy.Enums.ClientVersionBuild.V2_0_1_6180))
                 table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_PET_CAST_FAILED] = &Thunk_HermesProxy_World_Client_WorldClient_HandlePetCastFailedTBC_SMSG_PET_CAST_FAILED;
         }
+        table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_PET_DISMISS_SOUND] = &Thunk_HermesProxy_World_Client_WorldClient_HandlePetDismissSound_SMSG_PET_DISMISS_SOUND;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_PET_LEARNED_SPELLS] = &Thunk_HermesProxy_World_Client_WorldClient_HandlePetLearnedSpells_SMSG_PET_LEARNED_SPELLS;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_PET_NAME_INVALID] = &Thunk_HermesProxy_World_Client_WorldClient_HandlePetNameInvalid_SMSG_PET_NAME_INVALID;
         table[(int)global::HermesProxy.World.Enums.Opcode.SMSG_PET_SPELLS_MESSAGE] = &Thunk_HermesProxy_World_Client_WorldClient_HandlePetSpellsMessage_SMSG_PET_SPELLS_MESSAGE;
@@ -3437,6 +3443,7 @@ internal static unsafe class GeneratedSmsgDispatch
             global::HermesProxy.World.Enums.Opcode.SMSG_PET_ACTION_SOUND,
             global::HermesProxy.World.Enums.Opcode.SMSG_PET_BROKEN,
             global::HermesProxy.World.Enums.Opcode.SMSG_PET_CAST_FAILED,
+            global::HermesProxy.World.Enums.Opcode.SMSG_PET_DISMISS_SOUND,
             global::HermesProxy.World.Enums.Opcode.SMSG_PET_LEARNED_SPELLS,
             global::HermesProxy.World.Enums.Opcode.SMSG_PET_NAME_INVALID,
             global::HermesProxy.World.Enums.Opcode.SMSG_PET_SPELLS_MESSAGE,

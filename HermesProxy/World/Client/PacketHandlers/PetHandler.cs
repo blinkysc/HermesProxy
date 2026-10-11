@@ -223,6 +223,18 @@ public partial class WorldClient
         SendPacketToClient(sound);
     }
 
+    // The sound of a pet being dismissed, played at the pet's model and position. Same layout on both sides.
+    [HandlesSmsg(Opcode.SMSG_PET_DISMISS_SOUND)]
+    internal void HandlePetDismissSound(WorldPacket packet)
+    {
+        PetDismissSound sound = new PetDismissSound();
+        sound.ModelId = packet.ReadInt32();
+        sound.ModelPositionX = packet.ReadFloat();
+        sound.ModelPositionY = packet.ReadFloat();
+        sound.ModelPositionZ = packet.ReadFloat();
+        SendPacketToClient(sound);
+    }
+
     [HandlesSmsg(Opcode.SMSG_PET_BROKEN)]
     internal void HandlePetBroken(WorldPacket packet)
     {

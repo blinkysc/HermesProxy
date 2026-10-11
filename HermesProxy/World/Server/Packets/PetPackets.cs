@@ -186,6 +186,36 @@ class PetActionSound : ServerPacket, ISpanWritable
     public uint Action;
 }
 
+class PetDismissSound : ServerPacket, ISpanWritable
+{
+    public PetDismissSound() : base(Opcode.SMSG_PET_DISMISS_SOUND) { }
+
+    public override void Write()
+    {
+        _worldPacket.WriteInt32(ModelId);
+        _worldPacket.WriteFloat(ModelPositionX);
+        _worldPacket.WriteFloat(ModelPositionY);
+        _worldPacket.WriteFloat(ModelPositionZ);
+    }
+
+    public int MaxSize => 4 + 3 * 4; // ModelId + position
+
+    public int WriteToSpan(Span<byte> buffer)
+    {
+        var writer = new SpanPacketWriter(buffer);
+        writer.WriteInt32(ModelId);
+        writer.WriteFloat(ModelPositionX);
+        writer.WriteFloat(ModelPositionY);
+        writer.WriteFloat(ModelPositionZ);
+        return writer.Position;
+    }
+
+    public int ModelId;
+    public float ModelPositionX;
+    public float ModelPositionY;
+    public float ModelPositionZ;
+}
+
 public readonly record struct PetRename(PetRenameData RenameData);
 
 public struct PetRenameData
