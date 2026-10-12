@@ -320,6 +320,21 @@ public partial class WorldClient
             SendPacketToClient(failed);
             GetSession().GameState.LastCompletedNormalCast = null;
         }
+        // Count 0 answers no request (see CastMatches): a spell the server cast for the player
+        // failed, e.g. Envision Drakuru, which Drakuru's Elixir triggers, lacking its five Sacred
+        // Mojo. A native server reports it under that spell's own cast id
+        // (TrinityCore Spell::SendCastResult), and the client shows the reason.
+        else if (castCount == 0 && LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056))
+        {
+            CastFailed failed = new();
+            failed.SpellID = spellId;
+            failed.SpellXSpellVisualID = GameData.GetSpellVisual(spellId);
+            failed.Reason = LegacyVersion.ConvertSpellCastResult(reason);
+            failed.CastID = GetSession().GameState.FailedSyntheticCast(GetSession().GameState.CurrentPlayerGuid, spellId);
+            failed.FailedArg1 = arg1;
+            failed.FailedArg2 = arg2;
+            SendPacketToClient(failed);
+        }
     }
 
     [HandlesSmsg(Opcode.SMSG_PET_CAST_FAILED, RemovedIn = ClientVersionBuild.V2_0_1_6180)]

@@ -727,6 +727,19 @@ public sealed class GameSessionData
     }
 
     /// <summary>
+    /// The cast a failure of the server's own spell refers to: the open one if it had started,
+    /// else a new one. A spell that failed its checks never started, so it is not the latest
+    /// finished cast either, and is not recorded as one.
+    /// </summary>
+    public WowGuid128 FailedSyntheticCast(WowGuid128 caster, uint spellId)
+    {
+        var key = (caster, spellId);
+        if (_openSyntheticCasts.Remove(key, out var castId))
+            return _lastSyntheticCasts[key] = castId;
+        return NewSyntheticCastId(spellId);
+    }
+
+    /// <summary>
     /// The cast an interruption refers to: the open one, else the latest. The server reports an
     /// interruption twice (SPELL_FAILURE and SPELL_FAILED_OTHER), so both have to resolve to the
     /// same cast.

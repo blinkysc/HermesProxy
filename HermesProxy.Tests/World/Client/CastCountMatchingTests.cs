@@ -121,6 +121,42 @@ public class CastCountMatchingTests
     }
 
     [Fact]
+    public void FailureOfTheServersOwnSpell_ReachesTheClientUnderItsOwnCastId()
+    {
+        const byte Reagents = 100;
+        const int SacredMojo = 36758;
+        var pending = Pending(1, 10417);
+
+        // Drakuru's Elixir triggering Envision Drakuru without its reagents (capture of
+        // 2026-10-11 19:06:21): the failure names the triggered spell, with count 0.
+        Deliver(Opcode.SMSG_CAST_FAILED, LegacyPacketBuilder.Build(Opcode.SMSG_CAST_FAILED, p =>
+        {
+            p.WriteUInt8(0);
+            p.WriteUInt32(Frostbolt);
+            p.WriteUInt8(Reagents);
+            p.WriteInt32(SacredMojo);
+        }));
+
+        var failed = Assert.Single(_harness.ClientWire.Sent.Select(s => s.Packet).OfType<CastFailed>());
+        Assert.Equal(Frostbolt, failed.SpellID);
+        Assert.Equal(LegacyVersion.ConvertSpellCastResult(Reagents), failed.Reason);
+        Assert.Equal(SacredMojo, failed.FailedArg1);
+        Assert.NotEqual(pending.ServerGUID, failed.CastID);
+        Assert.Equal([pending], _harness.Session.GameState.PendingNormalCasts);
+    }
+
+    [Fact]
+    public void FailureOfTheServersOwnStartedSpell_SharesTheStartsCastId()
+    {
+        Deliver(Opcode.SMSG_SPELL_START, SpellStart(0));
+        Deliver(Opcode.SMSG_CAST_FAILED, CastFailed(0, Interrupted));
+
+        var start = Assert.Single(_harness.ClientWire.Sent.Select(s => s.Packet).OfType<SpellStart>());
+        var failed = Assert.Single(_harness.ClientWire.Sent.Select(s => s.Packet).OfType<CastFailed>());
+        Assert.Equal(start.Cast.CastID, failed.CastID);
+    }
+
+    [Fact]
     public void NextCastCount_SkipsZeroAndDropsAPendingCastStillHoldingTheCount()
     {
         var state = _harness.Session.GameState;
