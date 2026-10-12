@@ -256,7 +256,7 @@ public static class CharacterSystem
 
         // A 3.x server sends the per-character account data times only after this; they decide
         // whether the server's keybindings and macros are newer than the proxy's.
-        if (AccountDataManager.IsSyncedWithServer(0))
+        if (AccountDataManager.ServerKeepsAccountData)
             ctx.SendPacketToServer(new WorldPacket(Opcode.CMSG_READY_FOR_ACCOUNT_DATA_TIMES));
 
         WorldPacket packet = new WorldPacket(Opcode.CMSG_PLAYER_LOGIN);

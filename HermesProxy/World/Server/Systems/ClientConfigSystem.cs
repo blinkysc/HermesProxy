@@ -11,9 +11,9 @@ namespace HermesProxy.World.Server.Systems;
 /// </summary>
 /// <remarks>
 /// The proxy keeps the client's blobs in <c>AccountDataMgr</c> and answers the client from there.
-/// On a 3.x server the types both clients share (config, bindings, macros: 0-5) are also saved on
-/// the server, so they follow the character between the proxy and a native 3.3.5a client, and
-/// the newer of the two copies wins.
+/// On a 3.x server the types both clients share (bindings and macros: 2-5) are also saved on the
+/// server, so they follow the character between the proxy and a native 3.3.5a client, and the
+/// newer of the two copies wins. The config caches stay with the proxy; see AccountDataManager.
 /// </remarks>
 public static class ClientConfigSystem
 {

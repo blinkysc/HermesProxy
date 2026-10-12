@@ -376,10 +376,14 @@ public class AccountDataManager
         _realmName = realmName.Trim();
     }
 
-    // A 3.x server keeps account data types 0-7 (NUM_ACCOUNT_DATA_TYPES). Only 0-5 are synced:
-    // the layout (6) and chat (7) formats changed too much to share with a 3.3.5a client.
+    // A 3.x server keeps account data types 0-7 (NUM_ACCOUNT_DATA_TYPES). Only the bindings and
+    // macros (2-5) are synced, the types LegacyAccountDataConverter translates. The config caches
+    // (0, 1) are not shared: each client keeps the other's CVars in them, and the two give some
+    // of the same names different meanings, so a 3.3.5a client's save reset the modern client's
+    // camera distance and status text. The layout (6) and chat (7) formats changed too much.
     public const int ServerTypeCount = 8;
-    public const int ServerSyncedTypeCount = 6;
+    private const uint FirstServerSyncedType = 2;
+    private const uint ServerSyncedTypeEnd = 6;
     // PER_CHARACTER_CACHE_MASK: types 1, 3, 5, 6 and 7.
     public const uint ServerPerCharacterMask = 0xEA;
 
@@ -389,8 +393,11 @@ public class AccountDataManager
     // The client request a server copy is being fetched for, so the answer goes back to it.
     private readonly WowGuid128?[] _awaitingServer = new WowGuid128?[ServerTypeCount];
 
+    /// <summary>Whether the legacy server keeps account data at all (3.0.2 and later).</summary>
+    public static bool ServerKeepsAccountData => LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056);
+
     public static bool IsSyncedWithServer(uint type) =>
-        type < ServerSyncedTypeCount && LegacyVersion.AddedInVersion(ClientVersionBuild.V3_0_2_9056);
+        type is >= FirstServerSyncedType and < ServerSyncedTypeEnd && ServerKeepsAccountData;
 
     /// <summary>The newer of the local and the server copy's timestamps.</summary>
     public long GetEffectiveTime(uint type)
